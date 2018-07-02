@@ -1,6 +1,17 @@
 # -*- coding: utf-8 -*-
 import datetime
 
+class Result:
+	def __init__(self, count, token, obj=None):
+		self.count = count
+		self.token = token
+		self.obj = obj
+
+	def commit(self, obj):
+		self.obj = obj
+		return self
+
+
 class Recognizer:
 	def recognize(self, s):
 		count = 0
@@ -16,15 +27,15 @@ class Recognizer:
 
 			token += ch
 
-		return count, token.lower()
+		return Result(count, token.lower())
 
 R = Recognizer()
 
 class TimeRecognizer(Recognizer):
 
 	def recognize(self, s):
-		count, token = super().recognize(s)
-		token = token.replace(":", "")
+		ret = super().recognize(s)
+		token = ret.token.replace(":", "")
 
 		if len(token) not in [3, 4, 5] or not all([ch.isdigit() for ch in token]):
 			return None
@@ -35,7 +46,8 @@ class TimeRecognizer(Recognizer):
 		except ValueError:
 			return None
 
-		return count, res
+		ret.obj = res
+		return ret
 
 tr = TimeRecognizer()
 
@@ -61,20 +73,20 @@ class AircraftRecognizer(Recognizer):
 		self.aircrafts = aircrafts
 
 	def recognize(self, s):
-		count, token = super().recognize(s)
+		ret = super().recognize(s)
 
 		for aircraft in self.aircrafts:
-			if token == aircraft.regNo.lower():
-				return count, aircraft
-			elif aircraft.compNo and token.lower() == aircraft.compNo.lower():
-				return count, aircraft
-			elif "-" in token and "-" in aircraft.regNo:
-				if token.replace("-", "") == aircraft.regNo.lower().replace("-", ""):
-					return count, aircraft
-				elif token.split("-", 1)[1] == aircraft.regNo.lower().split("-", 1)[1]:
-					return count, aircraft
-			elif token[-2:] == aircraft.regNo[-2:].lower():
-				return count, aircraft
+			if ret.token == aircraft.regNo.lower():
+				return ret.commit(aircraft)
+			elif aircraft.compNo and ret.token.lower() == aircraft.compNo.lower():
+				return ret.commit(aircraft)
+			elif "-" in ret.token and "-" in aircraft.regNo:
+				if ret.token.replace("-", "") == aircraft.regNo.lower().replace("-", ""):
+					return ret.commit(aircraft)
+				elif ret.token.split("-", 1)[1] == aircraft.regNo.lower().split("-", 1)[1]:
+					return ret.commit(aircraft)
+			elif ret.token[-2:] == aircraft.regNo[-2:].lower():
+				return ret.commit(aircraft)
 
 		return None
 
@@ -120,9 +132,9 @@ class PilotRecognizer(Recognizer):
 				self.nicks[nickName] = pilot
 
 	def recognize(self, s):
-		count, token = super().recognize(s)
+		ret = super().recognize(s)
 
-		familyName = token.lower()
+		familyName = ret.token
 		family = None
 
 		if familyName not in self.families:
@@ -132,7 +144,7 @@ class PilotRecognizer(Recognizer):
 						family = self.families[key]
 						break
 			else:
-				return count, self.nicks[familyName]
+				return ret.commit(self.nicks[familyName])
 		else:
 			family = self.families[familyName]
 
@@ -140,22 +152,22 @@ class PilotRecognizer(Recognizer):
 			return None
 
 		try:
-			count2, token = super().recognize(s[count:])
-			firstName = token.lower()
+			ret2 = super().recognize(s[ret.count:])
+			firstName = ret2.token
 		except:
 			firstName = None
 
 		pilot = family[0]
 		if len(family) == 1:
 			if firstName and pilot.firstName.lower().startswith(firstName):
-				return count + count2, pilot
+				return Result(ret.count + ret2.count, s[:ret.count + ret2.count], pilot)
 
 		elif firstName:
 			for p in family:
 				if p.firstName.lower().startswith(firstName):
-					return count + count2, p
+					return Result(ret.count + ret2.count, s[:ret.count + ret2.count], p)
 
-		return count, pilot
+		return ret.commit(pilot)
 
 pr = PilotRecognizer([
 	Pilot("1", "Meier", "Max"),
@@ -166,12 +178,83 @@ pr = PilotRecognizer([
 	Pilot("6", "Starker", "Philipp")
 ])
 
+
+class Airfield():
+	def __init__(self, key, longName, shortName = None, icao = None):
+		super().__init__()
+
+		self.key = key
+		self.longName = longName
+		self.shortName = shortName
+		self.icao = icao
+
+	def __str__(self):
+		if self.icao:
+			return "%s (%s)" % (self.longName, self.icao)
+
+		return self.longName
+
+class AirfieldRecognizer(Recognizer):
+
+	def __init__(self, airfields):
+		super().__init__()
+		self.airfields = airfields
+
+		self.icaos = {}
+		self.shorts = {}
+
+		for a in airfields:
+			if a.icao:
+				self.icaos[a.icao.lower()] = a
+			if a.shortName:
+				self.shorts[a.shortName.lower()] = a
+
+	def recognize(self, s):
+		ret = super().recognize(s)
+
+		if ret.token in self.icaos:
+			return ret.commit(self.icaos[ret.token])
+
+		if ret.token in self.shorts:
+			return ret.commit(self.shorts[ret.token])
+
+		for a in self.airfields:
+			if ret.token in a.longName.lower():
+				return ret.commit(a)
+
+		return None
+
+
+fr = AirfieldRecognizer([
+	Airfield("1", "Iserlohn-Rheinermark", "rhmk"),
+	Airfield("2", "Iserlohn-Sümmern"),
+	Airfield("3", "Dortmund", "DTM", "EDLW"),
+	Airfield("4", "Meierberg"),
+	Airfield("5", "Altena-Hegenscheid")
+])
+
+
 txt = """
-MK YX meier schmu  1029  1218
-MK YL puddy 1035 1049
-D-KYYA meier, horst  ruhm   1145 1213
-DMRMK meier sta 1150 1230
+MK YX meier schmu  1029  1218 rhkm süm
+MK YL puddy 1035 1049 rhmk rhmk
+D-KYYA meier, horst  ruhm   1145 1213   edlw rhmk
+DMRMK meier sta 1150 1230 süm hegenscheid
 """
+
+class Activity():
+	def __init__(self, aircraft = None, takeoff = None, touchdown = None,
+	                pilot = None, copilot = None, ltakeoff = None, ltouchdown = None):
+
+		self.aircraft = aircraft
+		self.takeoff = takeoff
+		self.touchdown = touchdown
+		self.pilot = pilot
+		self.copilot = copilot
+
+		self.ltakeoff = ltakeoff
+		self.ltouchdown = ltouchdown
+
+		super().__init__()
 
 print(txt)
 
@@ -187,19 +270,20 @@ for s in txt.split("\n"):
 	idx += 1
 
 	while s:
-		for r in [tr, ar, pr]:
+		allow = [tr, ar, pr, fr]
+		for r in allow:
 			res = r.recognize(s)
 			if res:
 				break
 
 		if res is None:
 			res = R.recognize(s)
-			s = s[res[0]:]
-			unknown.append(res[1])
+			s = s[res.count:]
+			unknown.append(res.token)
 			continue
 
-		print("%s" % res[1])
-		s = s[res[0]:]
+		print("%s = %s" % (res.token, res.obj))
+		s = s[res.count:]
 
 	if unknown:
 		print("Unknown:", unknown)
