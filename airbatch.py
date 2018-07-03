@@ -80,12 +80,11 @@ class AircraftRecognizer(Recognizer):
 				return ret.commit(aircraft)
 			elif aircraft.compNo and ret.token.lower() == aircraft.compNo.lower():
 				return ret.commit(aircraft)
-			elif "-" in ret.token and "-" in aircraft.regNo:
-				if ret.token.replace("-", "") == aircraft.regNo.lower().replace("-", ""):
-					return ret.commit(aircraft)
-				elif ret.token.split("-", 1)[1] == aircraft.regNo.lower().split("-", 1)[1]:
-					return ret.commit(aircraft)
-			elif ret.token[-2:] == aircraft.regNo[-2:].lower():
+			elif ret.token.replace("-", "") == aircraft.regNo.lower().replace("-", ""):
+				return ret.commit(aircraft)
+			#elif ret.token.split("-", 1)[1] == aircraft.regNo.lower().split("-", 1)[1]:
+			#	return ret.commit(aircraft)
+			elif len(ret.token) == 2 and ret.token == aircraft.regNo[-2:].lower():
 				return ret.commit(aircraft)
 
 		return None
@@ -170,7 +169,7 @@ class PilotRecognizer(Recognizer):
 		return ret.commit(pilot)
 
 pr = PilotRecognizer([
-	Pilot("1", "Meier", "Max"),
+	Pilot("1", "Meier", "Max", nickName="Pille"),
 	Pilot("2", "Schmudel", "Rainer"),
 	Pilot("3", "Schielmann", "Peter", nickName="Puddy"),
 	Pilot("4", "Meier", "Horst"),
@@ -179,7 +178,7 @@ pr = PilotRecognizer([
 ])
 
 
-class Airfield():
+class Location():
 	def __init__(self, key, longName, shortName = None, icao = None):
 		super().__init__()
 
@@ -194,16 +193,16 @@ class Airfield():
 
 		return self.longName
 
-class AirfieldRecognizer(Recognizer):
+class LocationRecognizer(Recognizer):
 
-	def __init__(self, airfields):
+	def __init__(self, locations):
 		super().__init__()
-		self.airfields = airfields
+		self.locations = locations
 
 		self.icaos = {}
 		self.shorts = {}
 
-		for a in airfields:
+		for a in locations:
 			if a.icao:
 				self.icaos[a.icao.lower()] = a
 			if a.shortName:
@@ -218,32 +217,37 @@ class AirfieldRecognizer(Recognizer):
 		if ret.token in self.shorts:
 			return ret.commit(self.shorts[ret.token])
 
-		for a in self.airfields:
+		for a in self.locations:
 			if ret.token in a.longName.lower():
 				return ret.commit(a)
 
 		return None
 
 
-fr = AirfieldRecognizer([
-	Airfield("1", "Iserlohn-Rheinermark", "rhmk"),
-	Airfield("2", "Iserlohn-Sümmern"),
-	Airfield("3", "Dortmund", "DTM", "EDLW"),
-	Airfield("4", "Meierberg"),
-	Airfield("5", "Altena-Hegenscheid")
+defaultLocation = Location("1", "Iserlohn-Rheinermark", "rhmk")
+
+lr = LocationRecognizer([
+	defaultLocation,
+	Location("2", "Iserlohn-Sümmern"),
+	Location("3", "Dortmund", "DTM", "EDLW"),
+	Location("4", "Meierberg"),
+	Location("5", "Altena-Hegenscheid")
 ])
 
 
 txt = """
-MK YX meier schmu  1029  1218 rhkm süm
+MK  pille 1029 1035 1218 YX meier schmu  rhkm süm
 MK YL puddy 1035 1049 rhmk rhmk
 D-KYYA meier, horst  ruhm   1145 1213   edlw rhmk
 DMRMK meier sta 1150 1230 süm hegenscheid
 """
 
+#txt = "DMRMK meier sta 1150 1230 süm hegenscheid"
+
 class Activity():
 	def __init__(self, aircraft = None, takeoff = None, touchdown = None,
-	                pilot = None, copilot = None, ltakeoff = None, ltouchdown = None):
+					pilot = None, copilot = None, ltakeoff = None, ltouchdown = None,
+	                    note = None, link = None):
 
 		self.aircraft = aircraft
 		self.takeoff = takeoff
@@ -254,7 +258,108 @@ class Activity():
 		self.ltakeoff = ltakeoff
 		self.ltouchdown = ltouchdown
 
+		self.note = note
+
+		self.link = link
+		if link and not link.link:
+			link.link = self
+
 		super().__init__()
+
+	def setAircraft(self, aircraft):
+		assert isinstance(aircraft, Aircraft)
+
+		if not self.aircraft:
+			self.aircraft = aircraft
+			return True
+
+		return False
+
+	def setPilot(self, pilot):
+		assert isinstance(pilot, Pilot)
+		assert self.aircraft
+
+		if self.aircraft.seats >= 1 and self.pilot is None:
+			self.pilot = pilot
+			return True
+		elif self.aircraft.seats == 2 and self.copilot is None:
+			self.copilot = pilot
+			return True
+
+		return False
+
+	def setTime(self, time):
+		assert isinstance(time, datetime.datetime)
+
+		if not self.takeoff:
+			self.takeoff = time
+			return True
+
+		elif not self.touchdown or self.link and self.touchdown == self.link.touchdown:
+			self.touchdown = time
+
+			if self.touchdown < self.takeoff:
+				time = self.takeoff
+				self.takeoff = self.touchdown
+				self.touchdown = time
+
+			return True
+
+		return False
+
+	def setLocation(self, location):
+		assert isinstance(location, Location)
+		if not self.ltakeoff:
+			self.ltakeoff = location
+			return True
+
+		elif not self.ltouchdown:
+			self.ltouchdown = location
+			return True
+
+		return False
+
+	def set(self, attr):
+		if isinstance(attr, Aircraft):
+			return self.setAircraft(attr)
+		elif isinstance(attr, Pilot):
+			return self.setPilot(attr)
+		elif isinstance(attr, datetime.datetime):
+			return self.setTime(attr)
+		elif isinstance(attr, Location):
+			return self.setLocation(attr)
+
+		return False
+
+	def complete(self):
+		if self.takeoff and not self.touchdown:
+			self.setTime(self.takeoff)
+		elif not self.takeoff and self.link and self.link.takeoff:
+			self.takeoff = self.link.takeoff
+			if self.link.touchdown:
+				self.touchdown = self.link.touchdown
+
+		if self.ltakeoff and not self.ltouchdown:
+			self.setLocation(self.ltakeoff)
+		elif not self.ltakeoff:
+			if self.link and self.link.ltakeoff:
+				self.setLocation(self.link.ltakeoff)
+				self.setLocation(self.link.ltouchdown or self.ltakeoff)
+
+			self.setLocation(defaultLocation)
+			self.setLocation(defaultLocation)
+
+		return self.aircraft and self.pilot and self.takeoff and self.touchdown and self.ltakeoff and self.ltouchdown
+
+	def __str__(self):
+		txt = ""
+		if not self.complete():
+			txt += "!INCOMPLETE! "
+
+		txt += "%s   %s   %s   %s   %s   %s   %s" % (self.aircraft, self.pilot, self.copilot or "",
+		                                                self.takeoff, self.ltakeoff, self.touchdown, self.ltouchdown)
+
+		return txt
 
 print(txt)
 
@@ -269,9 +374,15 @@ for s in txt.split("\n"):
 	print("--- %d ---" % idx)
 	idx += 1
 
+	recognizers = [tr, ar, pr, lr]
+	launches = []
+	clarify = []
+	activity = None
+
 	while s:
-		allow = [tr, ar, pr, fr]
-		for r in allow:
+		res = None
+
+		for r in recognizers:
 			res = r.recognize(s)
 			if res:
 				break
@@ -282,8 +393,34 @@ for s in txt.split("\n"):
 			unknown.append(res.token)
 			continue
 
-		print("%s = %s" % (res.token, res.obj))
+		if isinstance(res.obj, Aircraft):
+			if activity:
+				activity = Activity(res.obj, takeoff=activity.takeoff, touchdown=activity.touchdown,
+				                                ltakeoff=activity.ltakeoff, ltouchdown=activity.ltouchdown,
+				                                    link=activity)
+			else:
+				activity = Activity(res.obj)
+
+			launches.append(activity)
+
+			if len(launches) == 2:
+				recognizers.remove(ar)
+
+			while clarify:
+				obj = clarify.pop()
+				if not activity.set(obj):
+					clarify.append(obj)
+					break
+
+		elif (activity and not activity.set(res.obj)) or not activity:
+			clarify.append(res.obj)
+
+		#print("%s = %s" % (res.token, res.obj))
 		s = s[res.count:]
+
+
+	for launch in launches:
+		print(launch)
 
 	if unknown:
 		print("Unknown:", unknown)
