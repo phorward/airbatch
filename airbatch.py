@@ -263,13 +263,13 @@ lr = LocationRecognizer([
 
 
 txt = """
-MK  pille 1029 1035 1218 YX meier schmu  rhkm süm
-MK YL puddy 1035 +10 rhmk rhmk
+MK  pille 1029 1035 1218 YX meier, horst schmu  rhkm süm
+MK pille 1035 +6 YL puddy +30 rhmk rhmk
 D-KYYA meier, horst  ruhm   1145 1213   edlw rhmk
 DMRMK meier sta 1150 1230 süm hegenscheid
 """
 
-txt = "MK YL puddy 1035 +10"
+#txt = "MK YL puddy 1035 +10"
 
 class Activity():
 	def __init__(self, aircraft = None, takeoff = None, touchdown = None, duration = None,
@@ -349,6 +349,8 @@ class Activity():
 		if self.takeoff:
 			self.touchdown = self.takeoff + self.duration
 
+		return True
+
 	def setLocation(self, location):
 		assert isinstance(location, Location)
 		if not self.ltakeoff:
@@ -377,11 +379,19 @@ class Activity():
 
 	def complete(self):
 		if self.takeoff and not self.touchdown:
-			self.setTime(self.takeoff)
+			if self.link and self.link.takeoff < self.takeoff:
+				self.touchdown = self.takeoff
+				self.takeoff = self.link.takeoff
+			else:
+				self.setTime(self.takeoff)
 		elif not self.takeoff and self.link and self.link.takeoff:
 			self.takeoff = self.link.takeoff
-			if self.link.touchdown:
+			if self.duration:
+				self.touchdown = self.takeoff + self.duration
+			elif self.link.touchdown:
 				self.touchdown = self.link.touchdown
+
+		self.duration = self.touchdown - self.takeoff
 
 		if self.ltakeoff and not self.ltouchdown:
 			self.setLocation(self.ltakeoff)
@@ -439,9 +449,7 @@ for s in txt.split("\n"):
 
 		if isinstance(res.obj, Aircraft):
 			if activity:
-				activity = Activity(res.obj, takeoff=activity.takeoff, touchdown=activity.touchdown,
-				                                ltakeoff=activity.ltakeoff, ltouchdown=activity.ltouchdown,
-				                                    link=activity)
+				activity = Activity(res.obj, link=activity)
 			else:
 				activity = Activity(res.obj)
 
