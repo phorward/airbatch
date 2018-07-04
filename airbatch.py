@@ -51,6 +51,33 @@ class TimeRecognizer(Recognizer):
 
 tr = TimeRecognizer()
 
+class DurationRecognizer(Recognizer):
+
+	def recognize(self, s):
+		ret = super().recognize(s)
+
+		token = ret.token
+		if not token.startswith("+"):
+			return None
+
+		token = token[1:]
+
+		if token.count(":") == 1:
+			token = token.split(":", 1)
+			try:
+				mins = int(token[0]) * 60 + int(token[1])
+			except ValueError:
+				return None
+		else:
+			try:
+				mins = int(token)
+			except ValueError:
+				return None
+
+		return ret.commit(datetime.timedelta(minutes=mins))
+
+dr = DurationRecognizer()
+
 class Aircraft():
 	def __init__(self, key, regNo, type, seats = 1, compNo = None, kind = "glider", launcher = False):
 		super().__init__()
@@ -237,21 +264,22 @@ lr = LocationRecognizer([
 
 txt = """
 MK  pille 1029 1035 1218 YX meier schmu  rhkm süm
-MK YL puddy 1035 1049 rhmk rhmk
+MK YL puddy 1035 +10 rhmk rhmk
 D-KYYA meier, horst  ruhm   1145 1213   edlw rhmk
 DMRMK meier sta 1150 1230 süm hegenscheid
 """
 
-#txt = "DMRMK meier sta 1150 1230 süm hegenscheid"
+txt = "MK YL puddy 1035 +10"
 
 class Activity():
-	def __init__(self, aircraft = None, takeoff = None, touchdown = None,
+	def __init__(self, aircraft = None, takeoff = None, touchdown = None, duration = None,
 					pilot = None, copilot = None, ltakeoff = None, ltouchdown = None,
 	                    note = None, link = None):
 
 		self.aircraft = aircraft
 		self.takeoff = takeoff
 		self.touchdown = touchdown
+		self.duration = duration
 		self.pilot = pilot
 		self.copilot = copilot
 
@@ -293,6 +321,9 @@ class Activity():
 
 		if not self.takeoff:
 			self.takeoff = time
+			if self.duration:
+				self.touchdown = self.takeoff + self.duration
+
 			return True
 
 		elif not self.touchdown or self.link and self.touchdown == self.link.touchdown:
@@ -303,9 +334,20 @@ class Activity():
 				self.takeoff = self.touchdown
 				self.touchdown = time
 
+			self.duration = self.touchdown - self.takeoff
 			return True
 
 		return False
+
+	def setDuration(self, duration):
+		assert isinstance(duration, datetime.timedelta)
+
+		if self.duration:
+			return False
+
+		self.duration = duration
+		if self.takeoff:
+			self.touchdown = self.takeoff + self.duration
 
 	def setLocation(self, location):
 		assert isinstance(location, Location)
@@ -326,6 +368,8 @@ class Activity():
 			return self.setPilot(attr)
 		elif isinstance(attr, datetime.datetime):
 			return self.setTime(attr)
+		elif isinstance(attr, datetime.timedelta):
+			return self.setDuration(attr)
 		elif isinstance(attr, Location):
 			return self.setLocation(attr)
 
@@ -356,9 +400,9 @@ class Activity():
 		if not self.complete():
 			txt += "!INCOMPLETE! "
 
-		txt += "%s   %s   %s   %s   %s   %s   %s" % (self.aircraft, self.pilot, self.copilot or "",
-		                                                self.takeoff, self.ltakeoff, self.touchdown, self.ltouchdown)
-
+		txt += "%s   %s   %s   %s   %s   %s   %s   %s" % (self.aircraft, self.pilot, self.copilot or "",
+		                                                self.takeoff, self.ltakeoff, self.touchdown, self.ltouchdown,
+		                                                    self.duration)
 		return txt
 
 print(txt)
@@ -374,7 +418,7 @@ for s in txt.split("\n"):
 	print("--- %d ---" % idx)
 	idx += 1
 
-	recognizers = [tr, ar, pr, lr]
+	recognizers = [tr, dr, ar, pr, lr]
 	launches = []
 	clarify = []
 	activity = None
