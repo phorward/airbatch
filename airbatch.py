@@ -11,6 +11,9 @@ class Result:
 		self.obj = obj
 		return self
 
+	def __str__(self):
+		return ">%s< => %s" % (self.token, self.obj or "None")
+
 
 class Recognizer:
 	def recognize(self, s):
@@ -79,7 +82,7 @@ class DurationRecognizer(Recognizer):
 dr = DurationRecognizer()
 
 class Aircraft():
-	def __init__(self, key, regNo, type, seats = 1, compNo = None, kind = "glider", launcher = False):
+	def __init__(self, key, regNo, type, seats = 1, compNo = None, kind = "glider", launcher = False, selfstart = False):
 		super().__init__()
 
 		self.key = key
@@ -90,6 +93,7 @@ class Aircraft():
 		assert kind in ["glider", "microlight", "motorglider"]
 		self.kind = kind
 		self.launcher = launcher
+		self.selfstart = selfstart
 
 	def __str__(self):
 		return "%s - %s" % (self.regNo, self.type)
@@ -121,7 +125,7 @@ ar = AircraftRecognizer([
 	Aircraft("2", "D-2074", "ASK 13", seats=2),
 	Aircraft("3", "D-8984", "ASK 13", seats=2),
 	Aircraft("4", "D-5014", "Duo Discus", compNo="YX", seats=2),
-	Aircraft("5", "D-KYYA", "Arcus M", compNo="YA", seats=2),
+	Aircraft("5", "D-KYYA", "Arcus M", compNo="YA", seats=2, selfstart=True),
 	Aircraft("6", "D-MRMK", "Turbo Savage", seats=2, kind="microlight", launcher=True)
 ])
 
@@ -262,15 +266,6 @@ lr = LocationRecognizer([
 ])
 
 
-txt = """
-MK  pille 1029 1035 1218 YX meier, horst schmu  rhkm süm
-MK pille 1035 +6 YL puddy +30 rhmk rhmk
-D-KYYA meier, horst  ruhm   1145 1213   edlw rhmk
-DMRMK meier sta 1150 1230 süm hegenscheid
-"""
-
-#txt = "MK YL puddy 1035 +10"
-
 class Activity():
 	def __init__(self, aircraft = None, takeoff = None, touchdown = None, duration = None,
 					pilot = None, copilot = None, ltakeoff = None, ltouchdown = None,
@@ -391,7 +386,7 @@ class Activity():
 			elif self.link.touchdown:
 				self.touchdown = self.link.touchdown
 
-		self.duration = self.touchdown - self.takeoff
+		self.duration = (self.touchdown or 0) - (self.takeoff or 0)
 
 		if self.ltakeoff and not self.ltouchdown:
 			self.setLocation(self.ltakeoff)
@@ -415,7 +410,27 @@ class Activity():
 		                                                    self.duration)
 		return txt
 
+	def clone(self, link = None):
+		return Activity(aircraft = self.aircraft, pilot = self.pilot, copilot=self.copilot, link = link)
+
+
+txt = """
+MK pille
+1029 1035 1218 YX meier, horst schmu  rhkm süm
+MK pille 1035 +7 YL puddy +30 rhmk rhmk
+D-KYYA meier, horst  ruhm   1145 1213   edlw rhmk
+DMRMK meier sta 1150 1230 süm hegenscheid
+"""
+
+#txt = "MK YL puddy 1035 +10"
+
 print(txt)
+
+presetLauncher = None
+presetDate = None
+presetAircraft = None
+presetPilot = None
+presetCopilot = None
 
 idx = 0
 for s in txt.split("\n"):
@@ -424,55 +439,111 @@ for s in txt.split("\n"):
 		continue
 
 	unknown = []
-
-	print("--- %d ---" % idx)
-	idx += 1
-
-	recognizers = [tr, dr, ar, pr, lr]
-	launches = []
 	clarify = []
-	activity = None
+
+	activities = []
+	current = None
 
 	while s:
 		res = None
 
-		for r in recognizers:
+		for r in [tr, dr, pr, ar, lr]:
 			res = r.recognize(s)
 			if res:
 				break
 
+		#print(res)
+
 		if res is None:
 			res = R.recognize(s)
 			s = s[res.count:]
-			unknown.append(res.token)
+			unknown.append(res)
 			continue
 
 		if isinstance(res.obj, Aircraft):
-			if activity:
-				activity = Activity(res.obj, link=activity)
+			if not current:
+				current = Activity(res.obj)
 			else:
-				activity = Activity(res.obj)
+				current = Activity(res.obj, link=current)
 
-			launches.append(activity)
+			activities.append(current)
 
-			if len(launches) == 2:
-				recognizers.remove(ar)
+			for cres in clarify[:]:
+				if current.set(cres.obj):
+					clarify.remove(cres)
 
-			while clarify:
-				obj = clarify.pop()
-				if not activity.set(obj):
-					clarify.append(obj)
-					break
-
-		elif (activity and not activity.set(res.obj)) or not activity:
-			clarify.append(res.obj)
+		elif (current and not current.set(res.obj)) or not current:
+			clarify.append(res)
 
 		#print("%s = %s" % (res.token, res.obj))
 		s = s[res.count:]
 
+	if len(activities) == 0 and clarify:
+		if presetAircraft:
+			launch = presetAircraft.clone()
+			for cres in clarify[:]:
+				if current.set(cres.obj):
+					clarify.remove(cres)
 
-	for launch in launches:
-		print(launch)
+			activities.append(launch)
+		else:
+			first = True
+			for c in clarify[:]:
+				if isinstance(c.obj, Pilot):
+					if first:
+						first = False
+						presetCopilot = None
+						presetPilot = None
+
+					if not presetPilot:
+						presetPilot = c.obj
+						clarify.remove(c)
+					elif not presetCopilot:
+						presetCopilot = c.obj
+						clarify.remove(c)
+
+	if len(activities) == 1:
+		launch = activities[0]
+
+		if not launch.complete():
+			if launch.aircraft.launcher:
+				presetLauncher = launch
+			else:
+				presetAircraft = launch
+		else:
+			if launch.aircraft.kind == "glider" and not launch.aircraft.selfstart:
+				if presetLauncher:
+					llaunch = presetLauncher.clone(launch)
+					activities.insert(0, llaunch)
+					llaunch.complete()
+
+					for cres in clarify[:]:
+						if isinstance(cres.obj, datetime.datetime) and cres.obj >= launch.touchdown:
+							launch.touchdown = cres.obj
+							clarify.remove(cres)
+							launch.complete()
+
+				else:
+					print("--- %d ---" % idx)
+					print(launch)
+					idx += 1
+			else:
+				print("--- %d ---" % idx)
+				print(launch)
+				idx += 1
+
+	# No else!
+	if len(activities) > 1:
+		if len(activities) > 2:
+			print("Too many launches per row, please spicify only two aircraft in total per row")
+
+		print("--- %d ---" % idx)
+		idx += 1
+		for launch in activities:
+			launch.complete()
+			print(launch)
+
+	unknown.extend(clarify)
 
 	if unknown:
-		print("Unknown:", unknown)
+		print("Unknown:", [(res.obj or res.token) for res in unknown])
