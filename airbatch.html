@@ -4,9 +4,12 @@
     <meta charset="UTF-8">
     <title>Air Batch</title>
 
-    <script src="airbatch.js"></script>
+    <script src="Brython-3.6.2/brython.js"></script>
+    <script src="Brython-3.6.2/brython_stdlib.js"></script>
 </head>
-<body>
+<body onload="brython()">
+    <script type="text/python" src="airbatch.py"></script>
+
     <ul id="list"></ul>
     <textarea id="editor"></textarea>
     <button id="btn-parse" onclick="parse()">Parse</button>
