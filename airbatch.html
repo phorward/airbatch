@@ -6,12 +6,143 @@
 
     <script src="Brython-3.6.2/brython.js"></script>
     <script src="Brython-3.6.2/brython_stdlib.js"></script>
+
+    <style>
+        textarea {
+            font-family: consolas, courier;
+            font-size: 14pt;
+            font-weight: bold;
+            color: #111144;
+
+            width: 100%;
+            min-height: 300px;
+        }
+
+        button {
+            width: 100%;
+        }
+
+        select.info {
+            float: left;
+            width: 33.3%;
+            height: 200px;
+        }
+
+        table {
+            width: 100%;
+            display: none;
+        }
+
+        table thead {
+            font-weight: bold;
+        }
+
+        table tbody {
+            color: #111144;
+        }
+
+        table tbody tr:nth-child(even) {
+            background-color: #ededed;
+        }
+
+    </style>
 </head>
 <body onload="brython()">
     <script type="text/python" src="airbatch.py"></script>
 
-    <ul id="list"></ul>
-    <textarea id="editor"></textarea>
-    <button id="btn-parse" onclick="parse()">Parse</button>
+    <select size="8" id="aircraft" class="info aircraft"></select>
+    <select size="8" id="pilot" class="info pilot"></select>
+    <select size="8" id="location" class="info location"></select>
+
+    <textarea id="editor">MK pille
+1029 1035 1218 YX meier, horst schmu  rhkm süm
+MK pille 1035 +7 YL puddy +30 rhmk rhmk
+D-KYYA meier, horst  ruhm   1145 1213   edlw rhmk
+DMRMK meier sta 1150 1230 süm hegenscheid
+    </textarea>
+    <button id="btn-parse">Parse</button>
+
+    <table id="result">
+        <thead>
+            <tr>
+                <td>Date</td>
+                <td>Aircraft</td>
+                <td>Pilot</td>
+                <td>Co-Pilot</td>
+                <td>Takeoff</td>
+                <td>in</td>
+                <td>Touchdown</td>
+                <td>in</td>
+                <td>Duration</td>
+            </tr>
+        </thead>
+        <tbody>
+        </tbody>
+    </table>
+
+    <script type="text/python">
+        from browser import document
+        import airbatch
+
+        def insertCode(txt):
+            editor = document["editor"]
+            start = editor.selectionStart
+            txt = editor.value[:start] + txt + " " + editor.value[start:]
+            editor.value = txt
+
+        def insertObject(event):
+            opt = event.target
+
+            print(opt)
+            txt = str(opt.obj)
+
+            if " - " in txt:
+                insertCode(txt.split(" - ", 1)[0].strip())
+            elif " (" in txt:
+                insertCode(txt.split(" (", 1)[0].strip())
+            else:
+                insertCode(txt)
+
+        for info in ["aircraft", "pilot", "location"]:
+            lst = getattr(airbatch, "demo" + info[0].upper() + info[1:] + "s")
+
+            for obj in lst:
+                opt = document.createElement("option");
+                opt["value"] = obj.key
+                opt.obj = obj
+                opt.appendChild(document.createTextNode(str(obj)))
+                document[info].appendChild(opt)
+
+            document[info].bind("dblclick", insertObject)
+
+        def doParse(event):
+            res = airbatch.parse(document["editor"].value)
+
+            body = document["result"].tBodies[0]
+            while body.firstChild:
+                body.removeChild(body.firstChild)
+
+            for entry in res:
+                row = body.insertRow()
+
+                for txt in [
+                    entry.takeoff.strftime("%d.%m.%Y"),
+                    str(entry.aircraft),
+                    str(entry.pilot),
+                    str(entry.copilot) if entry.copilot else "-",
+                    entry.takeoff.strftime("%H:%M"),
+                    str(entry.ltakeoff),
+                    entry.touchdown.strftime("%H:%M"),
+                    str(entry.ltouchdown),
+                    str(entry.duration)]:
+
+                    col = row.insertCell()
+                    col.innerHTML = txt
+
+                document["result"].style.display = "table"
+
+        document["btn-parse"].bind("click", doParse)
+
+    </script>
 </body>
 </html>
