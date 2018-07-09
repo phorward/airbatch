@@ -18,7 +18,7 @@ defaultLocation = demoLocations[0]
 class Activity():
 	def __init__(self, aircraft = None, takeoff = None, touchdown = None, duration = None,
 					pilot = None, copilot = None, ltakeoff = None, ltouchdown = None,
-	                    note = None, link = None):
+	                    note = None, link = None, cloneof = None):
 
 		self.aircraft = aircraft
 		self.takeoff = takeoff
@@ -31,6 +31,7 @@ class Activity():
 		self.ltouchdown = ltouchdown
 
 		self.note = note
+		self.cloneof = cloneof
 
 		self.link = link
 		if link and not link.link:
@@ -90,6 +91,10 @@ class Activity():
 			return False
 
 		self.duration = duration
+
+		if not self.takeoff and self.cloneof:
+			self.takeoff = self.cloneof.touchdown
+
 		if self.takeoff:
 			self.touchdown = self.takeoff + self.duration
 
@@ -122,6 +127,14 @@ class Activity():
 		return False
 
 	def complete(self):
+		if self.cloneof:
+			if not self.pilot:
+				self.pilot = self.cloneof.pilot
+			if not self.takeoff:
+				self.takeoff = self.cloneof.touchdown
+			if not self.ltakeoff:
+				self.ltakeoff = self.cloneof.ltakeoff
+
 		if self.takeoff and not self.touchdown:
 			if self.link and self.link.takeoff < self.takeoff:
 				self.touchdown = self.takeoff
@@ -160,9 +173,7 @@ class Activity():
 		return txt
 
 	def clone(self, link = None):
-		return Activity(aircraft = self.aircraft, pilot = self.pilot, copilot=self.copilot,
-		                    ltakeoff = self.ltakeoff, ltouchdown=self.ltouchdown,
-		                        takeoff = self.touchdown, link = link)
+		return Activity(aircraft = self.aircraft, link = link, cloneof = self)
 
 def parse(txt):
 	print(txt)
@@ -227,7 +238,6 @@ def parse(txt):
 				current = presetAircraft.clone()
 
 				for cres in clarify[:]:
-					print(cres.obj)
 					if current.set(cres.obj):
 						clarify.remove(cres)
 
