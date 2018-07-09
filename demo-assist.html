@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Air Batch - Assistant DEMO</title>
+
+    <script src="Brython-3.6.2/brython.js"></script>
+    <script src="Brython-3.6.2/brython_stdlib.js"></script>
+
+    <link rel="stylesheet" type="text/css" href="demo.css">
+</head>
+<body onload="brython()">
+    <script type="text/python" src="airbatch.py"></script>
+
+    <table id="result">
+        <thead>
+            <tr>
+                <td>Date</td>
+                <td>Aircraft</td>
+                <td>Pilot</td>
+                <td>Co-Pilot</td>
+                <td>Takeoff</td>
+                <td>in</td>
+                <td>Touchdown</td>
+                <td>in</td>
+                <td>Duration</td>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td colspan="9">
+                    <ul id="row">
+                        <li><input id="editor" type="text" /></li>
+                    </ul>
+                </td>
+            </tr>
+
+        </tbody>
+    </table>
+
+    <script type="text/python" src="demo-assist.py"></script>
+</body>
+</html>

@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Air Batch - Batch DEMO</title>
+
+    <script src="Brython-3.6.2/brython.js"></script>
+    <script src="Brython-3.6.2/brython_stdlib.js"></script>
+
+    <link rel="stylesheet" type="text/css" href="demo.css">
+</head>
+<body onload="brython()">
+    <script type="text/python" src="airbatch.py"></script>
+
+    <select size="8" id="aircraft" class="info aircraft"></select>
+    <select size="8" id="pilot" class="info pilot"></select>
+    <select size="8" id="location" class="info location"></select>
+
+    <textarea id="editor">MK pille
+1029 1035 1218 YX meier, horst schmu  rhmk süm
+MK pille 1035 +7 YL puddy +30 rhmk rhmk
+D-KYYA meier, horst  ruhm   1145 1213   edlw rhmk
+DMRMK meier sta 1150 1230 süm hegenscheid
+    </textarea>
+    <button id="btn-parse">Parse</button>
+
+    <table id="result">
+        <thead>
+            <tr>
+                <td>Line</td>
+                <td>Date</td>
+                <td>Aircraft</td>
+                <td>Pilot</td>
+                <td>Co-Pilot</td>
+                <td>Takeoff</td>
+                <td>in</td>
+                <td>Touchdown</td>
+                <td>in</td>
+                <td>Duration</td>
+            </tr>
+        </thead>
+        <tbody>
+        </tbody>
+    </table>
+
+    <script type="text/python" src="demo-batch.py"></script>
+</body>
+</html>

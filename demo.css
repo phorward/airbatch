@@ -1,0 +1,41 @@
+textarea {
+    font-family: consolas, courier;
+    font-size: 14pt;
+    font-weight: bold;
+    color: #111144;
+
+    width: 100%;
+    min-height: 300px;
+}
+
+button {
+    width: 100%;
+}
+
+select.info {
+    float: left;
+    width: 33.3%;
+    height: 200px;
+}
+
+table {
+    width: 100%;
+    display: none;
+}
+
+table thead {
+    font-weight: bold;
+}
+
+table tbody {
+    color: #111144;
+}
+
+table tbody tr:nth-child(even) {
+    background-color: #ededed;
+}
+
+table tbody tr.error
+{
+    background-color: indianred;
+}

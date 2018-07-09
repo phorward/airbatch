@@ -20,6 +20,8 @@ class Activity():
 					pilot = None, copilot = None, ltakeoff = None, ltouchdown = None,
 	                    note = None, link = None, cloneof = None):
 
+		self.row = 0
+
 		self.aircraft = aircraft
 		self.takeoff = takeoff
 		self.touchdown = touchdown
@@ -175,6 +177,15 @@ class Activity():
 	def clone(self, link = None):
 		return Activity(aircraft = self.aircraft, link = link, cloneof = self)
 
+class Error():
+	def __init__(self, row, tokens):
+		self.row = row
+		self.tokens = tokens
+
+	def __str__(self):
+		return ", ".join([(str(res.obj) if res.obj else res.token + "?") for res in self.tokens])
+
+
 def parse(txt):
 	print(txt)
 	results = []
@@ -186,13 +197,20 @@ def parse(txt):
 	presetCopilot = None
 
 	idx = 0
+	row = 0
 	for s in txt.split("\n"):
+		row += 1
 		s = s.strip()
 		if not s:
+			presetAircraft = None
+			presetLauncher = None
+			presetPilot = None
+			presetCopilot = None
 			continue
 
 		unknown = []
 		clarify = []
+		tokens = []
 
 		activities = []
 		current = None
@@ -211,7 +229,10 @@ def parse(txt):
 				res = R.recognize(s)
 				s = s[res.count:]
 				unknown.append(res)
+				tokens.append(res)
 				continue
+
+			tokens.append(res)
 
 			if isinstance(res.obj, Aircraft):
 				if not current:
@@ -231,7 +252,7 @@ def parse(txt):
 			#print("%s = %s" % (res.token, res.obj))
 			s = s[res.count:]
 
-		#print(len(activities), clarify)
+		print(len(activities), [(str(res.obj) if res.obj else res.token) for res in clarify])
 
 		if len(activities) == 0 and clarify:
 			if presetAircraft:
@@ -263,6 +284,19 @@ def parse(txt):
 			launch = activities[0]
 
 			if not launch.complete():
+				if launch.takeoff:
+					if not launch.pilot:
+						launch.pilot = presetPilot
+					if not launch.copilot:
+						launch.copilot = presetCopilot
+
+					if launch.complete():
+						launch.row = row
+						results.append(launch)
+						idx += 1
+					else:
+						clarify.extend(tokens)
+
 				if launch.aircraft.launcher:
 					presetAircraft = presetLauncher = launch
 				else:
@@ -284,6 +318,7 @@ def parse(txt):
 					else:
 						print("--- %d ---" % idx)
 						print(launch)
+						launch.row = row
 						results.append(launch)
 						idx += 1
 
@@ -291,6 +326,7 @@ def parse(txt):
 				else:
 					print("--- %d ---" % idx)
 					print(launch)
+					launch.row = row
 					results.append(launch)
 					idx += 1
 
@@ -305,6 +341,7 @@ def parse(txt):
 			idx += 1
 			for launch in activities:
 				launch.complete()
+				launch.row = row
 				print(launch)
 				results.append(launch)
 
@@ -312,5 +349,6 @@ def parse(txt):
 
 		if unknown:
 			print("Unknown:", [(str(res.obj) if res.obj else res.token) for res in unknown])
+			results.append(Error(row, unknown))
 
 	return results
