@@ -25,7 +25,7 @@ class PilotRecognizer(Recognizer):
 				nickName = pilot.nickName.lower()
 				self.nicks[nickName] = pilot
 
-	def recognize(self, s):
+	def _recognizePilots(self, s):
 		ret = super().recognize(s)
 
 		familyName = ret.token
@@ -61,9 +61,26 @@ class PilotRecognizer(Recognizer):
 				if p.firstName.lower().startswith(firstName):
 					return Result(ret.count + ret2.count, s[:ret.count + ret2.count], p)
 
-		return ret.commit(pilot)
+		if len(family) == 1:
+			return ret.commit(pilot)
 
-class Pilot():
+		return ret.clone(family)
+
+	def recognize(self, s):
+		ret = self._recognizePilots(s)
+		if not ret:
+			return None
+
+		if isinstance(ret, list):
+			return ret[0]
+
+		return ret
+
+	def propose(self, s):
+		return self._recognizePilots(s)
+
+
+class Pilot:
 	def __init__(self, key, lastName, firstName, nickName = None):
 		super().__init__()
 

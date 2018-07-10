@@ -51,6 +51,6 @@ ul.editor-proposal
 
 input.unknown
 {
-    opacity: 30%;
-    background-color: red;
+    background-color: rgba(255,0,0,0.5);
+;
 }

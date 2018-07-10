@@ -28,8 +28,25 @@ class AircraftRecognizer(Recognizer):
 
 		return None
 
+	def propose(self, s):
+		ret = super().recognize(s)
+		res = []
 
-class Aircraft():
+		for aircraft in self.aircrafts:
+			if aircraft.regNo.lower().startswith(ret.token):
+				res.append(aircraft)
+			elif aircraft.compNo and aircraft.compNo.lower().startswith(ret.token):
+				res.append(aircraft)
+			elif ret.token.replace("-", "") == aircraft.regNo.lower().replace("-", ""):
+				res.append(aircraft)
+			elif len(ret.token) == 2 and ret.token == aircraft.regNo[-2:].lower():
+				res.append(aircraft)
+			elif ret.token in aircraft.type.lower():
+				res.append(aircraft)
+
+		return ret.clone(res)
+
+class Aircraft:
 	def __init__(self, key, regNo, type, seats = 1, compNo = None, kind = "glider", launcher = False, selfstart = False):
 		super().__init__()
 

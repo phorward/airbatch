@@ -35,7 +35,21 @@ class LocationRecognizer(Recognizer):
 
 		return None
 
+	def propose(self, s):
+		ret = super().recognize(s)
+		res = []
 
+		if ret.token in self.icaos:
+			return ret.commit(self.icaos[ret.token])
+
+		if ret.token in self.shorts:
+			return ret.commit(self.shorts[ret.token])
+
+		for a in self.locations:
+			if ret.token in a.longName.lower():
+				res.append(a)
+
+		return ret.clone(res)
 
 class Location():
 	def __init__(self, key, longName, shortName = None, icao = None):

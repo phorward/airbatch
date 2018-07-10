@@ -15,6 +15,17 @@ class Result:
 		self.obj = obj
 		return self
 
+	def clone(self, obj = None):
+		if isinstance(obj, list):
+			ret = []
+
+			for x in obj:
+				ret.append(self.clone(x))
+
+			return ret
+
+		return Result(self.count, self.token, obj or self.obj)
+
 	def __str__(self):
 		return ">%s< => %s" % (self.token, self.obj or "None")
 
@@ -40,6 +51,8 @@ class Recognizer:
 
 		return Result(count, token.lower())
 
+	def propose(self, s):
+		return self.recognize(s)
 
 class TimeRecognizer(Recognizer):
 	"""

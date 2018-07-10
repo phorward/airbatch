@@ -11,19 +11,22 @@ editorProposal = document["editor-proposal"]
 
 allowedRecognizers = [airbatch.ar, airbatch.pr, airbatch.lr, airbatch.tr, airbatch.dr]
 
-def extendLine(obj):
+def extendLine(result):
 	global editor, editorRow, editorCol
 
-	if isinstance(obj, html.LI):
-		li = obj
+	if isinstance(result, html.LI):
+		li = result
 	else:
-		li = html.LI(str(obj))
-		li.obj = obj
+		li = html.LI(str(result))
+		li.result = result
 
 	editorRow.insertBefore(li, editorCol)
 
-	editor.value = ""
+	editor.value = editor.value[li.result.count:].strip()
 	editor.focus()
+
+	if editor.value:
+		checkInput()
 
 
 def clearProposals():
@@ -34,12 +37,8 @@ def clearProposals():
 
 	editorProposal.style.display = "none"
 
-def checkInput():
+def checkInput(*args, **kwargs):
 	global editor, editorProposal, allowedRecognizers
-
-	editor.disabled = True
-
-	matches = []
 
 	s = editor.value.strip()
 
@@ -49,24 +48,41 @@ def checkInput():
 	if not s:
 		return
 
+	matches = []
+	editor.disabled = True
+
 	for r in allowedRecognizers:
-		res = r.recognize(s)
+		res = r.propose(s)
+
 		if res:
-			matches.append(res)
+			if isinstance(res, list):
+				matches.extend(res)
+			else:
+				matches.append(res)
+
+				if len(matches) == 1 and res.token == s:
+					break
 
 	print(matches)
 
 	if matches:
 		if len(matches) > 1:
 			for res in matches:
-				li = html.LI(str(res.obj))
-				li.obj = res.obj
+				if isinstance(res.obj, list):
+					for obj in res.obj:
+						li = html.LI(str(obj))
+						li.result = res.clone(obj)
 
-				editorProposal.appendChild(li)
+						editorProposal.appendChild(li)
+				else:
+					li = html.LI(str(res.obj))
+					li.result = res
+
+					editorProposal.appendChild(li)
 
 			editorProposal.style.display = "block"
 		else:
-			extendLine(matches[0].obj)
+			extendLine(matches[0])
 	else:
 		editor.classList.add("unknown")
 
@@ -74,9 +90,9 @@ def checkInput():
 
 
 def selectProposal(e):
-	print(e.target.obj)
+	print(e.target.result)
 
-	extendLine(e.target.obj)
+	extendLine(e.target.result)
 	clearProposals()
 
 editorProposal.bind("click", selectProposal)
@@ -92,12 +108,10 @@ def setTimeout(e):
 		window.clearTimeout(editorTimeout)
 		editorTimeout = None
 
-	if editor.value[-1] == " ":
-		checkInput()
-	else:
-		editorTimeout = window.setTimeout(checkInput, 500)
+	editorTimeout = window.setTimeout(checkInput, 1000)
 
 editor.bind("keyup", setTimeout)
+editor.bind("change", checkInput)
 
 window.setTimeout(editor.focus, 500)
 
