@@ -20,7 +20,6 @@ select.info {
 
 table {
     width: 100%;
-    display: none;
 }
 
 table thead {
@@ -38,4 +37,20 @@ table tbody tr:nth-child(even) {
 table tbody tr.error
 {
     background-color: indianred;
+}
+
+ul {
+    list-style: none;
+    padding: 0;
+}
+
+ul.editor-proposal
+{
+    display: none;
+}
+
+input.unknown
+{
+    opacity: 30%;
+    background-color: red;
 }

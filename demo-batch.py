@@ -2,6 +2,8 @@
 from browser import document
 import airbatch
 
+processor = airbatch.Processor()
+
 def insertCode(txt):
 	editor = document["editor"]
 	start = editor.selectionStart
@@ -34,7 +36,10 @@ for info in ["aircraft", "pilot", "location"]:
 	document[info].bind("dblclick", insertObject)
 
 def doParse(event):
-	res = airbatch.parse(document["editor"].value)
+	global processor
+
+	processor.reset()
+	res = processor.parse(document["editor"].value)
 
 	body = document["result"].tBodies[0]
 	while body.firstChild:
@@ -70,4 +75,5 @@ def doParse(event):
 
 		document["result"].style.display = "table"
 
+document["result"].style.display = "none"
 document["btn-parse"].bind("click", doParse)

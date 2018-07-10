@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 import datetime
-from recognizer import Recognizer, TimeRecognizer, DurationRecognizer
+from recognizer import Recognizer, Result, TimeRecognizer, DurationRecognizer
 from aircraft import AircraftRecognizer, Aircraft, demoAircrafts
 from pilot import PilotRecognizer, Pilot, demoPilots
 from location import LocationRecognizer, Location, demoLocations
@@ -137,6 +137,9 @@ class Activity():
 			if not self.ltakeoff:
 				self.ltakeoff = self.cloneof.ltakeoff
 
+			if self.duration:
+				self.touchdown = self.takeoff + self.duration
+
 		if self.takeoff and not self.touchdown:
 			if self.link and self.link.takeoff < self.takeoff:
 				self.touchdown = self.takeoff
@@ -150,7 +153,8 @@ class Activity():
 			elif self.link.touchdown:
 				self.touchdown = self.link.touchdown
 
-		self.duration = (self.touchdown or 0) - (self.takeoff or 0)
+		if self.takeoff and self.touchdown:
+			self.duration = self.touchdown - self.takeoff
 
 		if self.ltakeoff and not self.ltouchdown:
 			self.setLocation(self.ltakeoff)
@@ -178,177 +182,233 @@ class Activity():
 		return Activity(aircraft = self.aircraft, link = link, cloneof = self)
 
 class Error():
-	def __init__(self, row, tokens):
+	def __init__(self, tokens, row = None):
+		super().__init__()
+
 		self.row = row
 		self.tokens = tokens
 
 	def __str__(self):
 		return ", ".join([(str(res.obj) if res.obj else res.token + "?") for res in self.tokens])
 
+class Processor():
+	def __init__(self):
+		super().__init__()
 
-def parse(txt):
-	print(txt)
-	results = []
+		self.presetLauncher = None
+		self.presetDate = None
+		self.presetAircraft = None
+		self.presetPilot = None
+		self.presetCopilot = None
 
-	presetLauncher = None
-	presetDate = None
-	presetAircraft = None
-	presetPilot = None
-	presetCopilot = None
+		self.unknown = []
+		self.clarify = []
+		self.tokens = []
 
-	idx = 0
-	row = 0
-	for s in txt.split("\n"):
-		row += 1
-		s = s.strip()
-		if not s:
-			presetAircraft = None
-			presetLauncher = None
-			presetPilot = None
-			presetCopilot = None
-			continue
+		self.activities = []
+		self.current = None
 
-		unknown = []
-		clarify = []
-		tokens = []
+	def reset(self):
 
-		activities = []
-		current = None
+		self.presetLauncher = None
+		self.presetDate = None
+		self.presetAircraft = None
+		self.presetPilot = None
+		self.presetCopilot = None
+		
+	def extend(self, res):
+		if not isinstance(res, Result):
+			res = Result(len(str(res)), str(res), res)
 
-		while s:
-			res = None
+		self.tokens.append(res)
 
-			for r in [tr, dr, pr, ar, lr]:
-				res = r.recognize(s)
-				if res:
-					break
+		if isinstance(res.obj, Aircraft):
+			if not self.current:
+				self.current = Activity(res.obj)
+			else:
+				self.current = Activity(res.obj, link=self.current)
 
-			#print(res)
+			self.activities.append(self.current)
 
-			if res is None:
-				res = R.recognize(s)
-				s = s[res.count:]
-				unknown.append(res)
-				tokens.append(res)
-				continue
+			for cres in self.clarify[:]:
+				if self.current.set(cres.obj):
+					self.clarify.remove(cres)
 
-			tokens.append(res)
+		elif (self.current and not self.current.set(res.obj)) or not self.current:
+			self.clarify.append(res)
 
-			if isinstance(res.obj, Aircraft):
-				if not current:
-					current = Activity(res.obj)
-				else:
-					current = Activity(res.obj, link=current)
+	def commit(self):
+		results = []
 
-				activities.append(current)
+		print(len(self.activities), [(str(res.obj) if res.obj else res.token) for res in self.clarify])
 
-				for cres in clarify[:]:
-					if current.set(cres.obj):
-						clarify.remove(cres)
+		if len(self.activities) == 0 and self.clarify:
+			if self.presetAircraft:
+				self.current = self.presetAircraft.clone()
 
-			elif (current and not current.set(res.obj)) or not current:
-				clarify.append(res)
+				for cres in self.clarify[:]:
+					if self.current.set(cres.obj):
+						self.clarify.remove(cres)
 
-			#print("%s = %s" % (res.token, res.obj))
-			s = s[res.count:]
-
-		print(len(activities), [(str(res.obj) if res.obj else res.token) for res in clarify])
-
-		if len(activities) == 0 and clarify:
-			if presetAircraft:
-				current = presetAircraft.clone()
-
-				for cres in clarify[:]:
-					if current.set(cres.obj):
-						clarify.remove(cres)
-
-				current.complete()
-				activities.append(current)
+				self.current.complete()
+				self.activities.append(self.current)
 			else:
 				first = True
-				for c in clarify[:]:
+				for c in self.clarify[:]:
 					if isinstance(c.obj, Pilot):
 						if first:
 							first = False
-							presetCopilot = None
-							presetPilot = None
+							self.presetCopilot = None
+							self.presetPilot = None
 
-						if not presetPilot:
-							presetPilot = c.obj
-							clarify.remove(c)
-						elif not presetCopilot:
-							presetCopilot = c.obj
-							clarify.remove(c)
+						if not self.presetPilot:
+							self.presetPilot = c.obj
+							self.clarify.remove(c)
+						elif not self.presetCopilot:
+							self.presetCopilot = c.obj
+							self.clarify.remove(c)
 
-		if len(activities) == 1:
-			launch = activities[0]
+		if len(self.activities) == 1:
+			launch = self.activities[0]
 
 			if not launch.complete():
+				if not launch.cloneof:
+					if self.presetAircraft and launch.aircraft is self.presetAircraft.aircraft:
+						launch.cloneof = self.presetAircraft
+						launch.complete()
+					elif self.presetLauncher and launch.aircraft is self.presetLauncher.aircraft:
+						launch.cloneof = self.presetLauncher
+						launch.complete()
+
 				if launch.takeoff:
 					if not launch.pilot:
-						launch.pilot = presetPilot
+						launch.pilot = self.presetPilot
 					if not launch.copilot:
-						launch.copilot = presetCopilot
+						launch.copilot = self.presetCopilot
 
 					if launch.complete():
-						launch.row = row
 						results.append(launch)
-						idx += 1
 					else:
-						clarify.extend(tokens)
+						self.clarify.extend(self.tokens)
 
 				if launch.aircraft.launcher:
-					presetAircraft = presetLauncher = launch
+					self.presetAircraft = self.presetLauncher = launch
 				else:
-					presetAircraft = launch
+					self.presetAircraft = launch
 
 			else:
 				if launch.aircraft.kind == "glider" and not launch.aircraft.selfstart:
-					if presetLauncher:
-						llaunch = presetLauncher.clone(launch)
-						activities.insert(0, llaunch)
+					if self.presetLauncher:
+						llaunch = self.presetLauncher.clone(launch)
+						self.activities.insert(0, llaunch)
 						llaunch.complete()
 
-						for cres in clarify[:]:
+						for cres in self.clarify[:]:
 							if isinstance(cres.obj, datetime.datetime) and cres.obj >= launch.touchdown:
 								launch.touchdown = cres.obj
-								clarify.remove(cres)
+								self.clarify.remove(cres)
 								launch.complete()
 
 					else:
-						print("--- %d ---" % idx)
 						print(launch)
-						launch.row = row
 						results.append(launch)
-						idx += 1
 
-						presetAircraft = launch
+						self.presetAircraft = launch
 				else:
-					print("--- %d ---" % idx)
 					print(launch)
-					launch.row = row
 					results.append(launch)
-					idx += 1
 
-					presetAircraft = launch
+					self.presetAircraft = launch
 
 		# No else!
-		if len(activities) > 1:
-			if len(activities) > 2:
+		if len(self.activities) > 1:
+			if len(self.activities) > 2:
 				print("Too many launches per row, please spicify only two aircraft in total per row")
 
-			print("--- %d ---" % idx)
-			idx += 1
-			for launch in activities:
-				launch.complete()
-				launch.row = row
+			for launch in self.activities:
+				ok = launch.complete()
+				if not ok:
+					if not launch.cloneof:
+						if self.presetAircraft and launch.aircraft is self.presetAircraft.aircraft:
+							launch.cloneof = self.presetAircraft
+							ok = launch.complete()
+						elif self.presetLauncher and launch.aircraft is self.presetLauncher.aircraft:
+							launch.cloneof = self.presetLauncher
+							ok = launch.complete()
+
+				if launch.aircraft.launcher:
+					self.presetLauncher = launch
+				else:
+					self.presetAircraft = launch
+
+				if not ok:
+					continue
+
 				print(launch)
 				results.append(launch)
 
-		unknown.extend(clarify)
+		self.unknown.extend(self.clarify)
 
-		if unknown:
-			print("Unknown:", [(str(res.obj) if res.obj else res.token) for res in unknown])
-			results.append(Error(row, unknown))
+		if self.unknown:
+			print("Unknown:", [(str(res.obj) if res.obj else res.token) for res in self.unknown])
+			results.append(Error(self.unknown))
 
-	return results
+		self.unknown = []
+		self.clarify = []
+		self.tokens = []
+
+		self.activities = []
+		self.current = None
+
+		return results
+
+	def parse(self, txt):
+		results = []
+		print(txt)
+
+		idx = 0
+		row = 0
+		for s in txt.split("\n"):
+			row += 1
+			s = s.strip()
+			if not s:
+				self.presetAircraft = None
+				self.presetLauncher = None
+				self.presetPilot = None
+				self.presetCopilot = None
+				continue
+
+			while s:
+				res = None
+
+				for r in [tr, dr, pr, ar, lr]:
+					res = r.recognize(s)
+					if res:
+						break
+
+				#print(res)
+
+				if res is None:
+					res = R.recognize(s)
+					s = s[res.count:]
+					self.unknown.append(res)
+					self.tokens.append(res)
+					continue
+
+				self.extend(res)
+
+				#print("%s = %s" % (res.token, res.obj))
+				s = s[res.count:]
+
+			rowResults = self.commit()
+
+			if rowResults:
+				print("--- %d ---" % idx)
+				idx += 1
+
+				for res in rowResults:
+					res.row = row
+
+				results.extend(rowResults)
+
+		return results
