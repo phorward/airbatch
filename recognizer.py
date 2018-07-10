@@ -27,7 +27,7 @@ class Result:
 		return Result(self.count, self.token, obj or self.obj)
 
 	def __str__(self):
-		return ">%s< => %s" % (self.token, self.obj or "None")
+		return "'%s' => %s" % (self.token, str(self.obj) or "None")
 
 
 class Recognizer:

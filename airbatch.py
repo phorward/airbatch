@@ -168,6 +168,16 @@ class Activity():
 
 		return self.aircraft and self.pilot and self.takeoff and self.touchdown and self.ltakeoff and self.ltouchdown
 
+	def __contains__(self, obj):
+		return (self.aircraft is obj
+				or self.pilot is obj
+				or self.copilot is obj
+				or self.takeoff is obj
+				or self.touchdown is obj
+				or self.ltakeoff is obj
+				or self.ltouchdown is obj
+		        or (self.duration is obj or self.duration == obj))
+
 	def __str__(self):
 		txt = ""
 		if not self.complete():
@@ -208,13 +218,20 @@ class Processor():
 		self.activities = []
 		self.current = None
 
-	def reset(self):
+	def reset(self, hard = True):
+		if hard:
+			self.presetLauncher = None
+			self.presetDate = None
+			self.presetAircraft = None
+			self.presetPilot = None
+			self.presetCopilot = None
 
-		self.presetLauncher = None
-		self.presetDate = None
-		self.presetAircraft = None
-		self.presetPilot = None
-		self.presetCopilot = None
+		self.unknown = []
+		self.clarify = []
+		self.tokens = []
+
+		self.activities = []
+		self.current = None
 		
 	def extend(self, res):
 		if not isinstance(res, Result):
@@ -353,12 +370,7 @@ class Processor():
 			print("Unknown:", [(str(res.obj) if res.obj else res.token) for res in self.unknown])
 			results.append(Error(self.unknown))
 
-		self.unknown = []
-		self.clarify = []
-		self.tokens = []
-
-		self.activities = []
-		self.current = None
+		self.reset(False)
 
 		return results
 

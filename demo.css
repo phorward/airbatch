@@ -44,13 +44,80 @@ ul {
     padding: 0;
 }
 
-ul.editor-proposal
+tbody#final
+{
+    border-bottom: 1px dashed black;
+}
+
+tr#construction-row
+{
+    background-color: #aaaadd;
+    opacity: 0.55;
+}
+
+tr#construction-row td
+{
+    padding: 10px;
+    margin: 0;
+}
+
+ul#editor-row > li
+{
+    float: left;
+    margin: 0px 10px;
+    background-color: snow;
+    border-radius: 3px;
+    padding: 10px;
+}
+
+li#editor-col
+{
+    background-color: transparent !important;
+    padding: 0 !important;
+    margin: 0 !important;
+}
+
+ul#editor-proposal
 {
     display: none;
 }
 
+ul#editor-proposal li
+{
+    cursor: pointer;
+}
+
+input
+{
+    border-radius: 3px;
+    border: 1px solid blue;
+    padding: 10px;
+}
+
 input.unknown
 {
-    background-color: rgba(255,0,0,0.5);
-;
+    border: 1px solid red;
 }
+
+span.token
+{
+    font-style:italic;
+    color: gray;
+    margin-right: 10px;
+}
+
+span.close, span.commit
+{
+    display: inline-block;
+    width: 20px;
+    height: 20px;
+    text-align: center;
+    color: red;
+    border-radius: 3px;
+    background-color: lightgray;
+
+    margin: 0px 2px;
+
+    cursor: pointer;
+}
+
