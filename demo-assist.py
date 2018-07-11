@@ -104,14 +104,11 @@ def rebuildBatch():
 			row.classList.add("error")
 
 			col = row.insertCell()
-			col.innerHTML = str(entry.row)
-
-			col = row.insertCell()
 			col.colSpan = "10"
 			col.innerHTML = str(entry)
 
 		construction.insertBefore(row, lastRow)
-		lastRow = row
+		#lastRow = row
 
 
 def createMatchLi(result):

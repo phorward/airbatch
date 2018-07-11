@@ -141,7 +141,7 @@ class Activity():
 				self.touchdown = self.takeoff + self.duration
 
 		if self.takeoff and not self.touchdown:
-			if self.link and self.link.takeoff < self.takeoff:
+			if self.link and self.link.takeoff and self.link.takeoff < self.takeoff:
 				self.touchdown = self.takeoff
 				self.takeoff = self.link.takeoff
 			else:
@@ -247,9 +247,11 @@ class Processor():
 
 			self.activities.append(self.current)
 
-			for cres in self.clarify[:]:
-				if self.current.set(cres.obj):
-					self.clarify.remove(cres)
+			while self.clarify:
+				cres = self.clarify.pop(0)
+				if not self.current.set(cres.obj):
+					self.clarify.insert(0, cres)
+					break
 
 		elif (self.current and not self.current.set(res.obj)) or not self.current:
 			self.clarify.append(res)
@@ -263,9 +265,11 @@ class Processor():
 			if self.presetAircraft:
 				self.current = self.presetAircraft.clone()
 
-				for cres in self.clarify[:]:
-					if self.current.set(cres.obj):
-						self.clarify.remove(cres)
+				while self.clarify:
+					cres = self.clarify.pop(0)
+					if not self.current.set(cres.obj):
+						self.clarify.insert(0, cres)
+						break
 
 				self.current.complete()
 				self.activities.append(self.current)
@@ -344,6 +348,7 @@ class Processor():
 
 			for launch in self.activities:
 				ok = launch.complete()
+
 				if not ok:
 					if not launch.cloneof:
 						if self.presetAircraft and launch.aircraft is self.presetAircraft.aircraft:
@@ -364,6 +369,37 @@ class Processor():
 				print(launch)
 				results.append(launch)
 
+		# OK, now clarify the rest, if necessary
+		if self.clarify and len(results) == 1:
+			activity = None
+			consumed = 0
+
+			while self.clarify:
+				cres = self.clarify.pop(0)
+
+				if activity is None:
+					activity = results[-1].clone()
+
+				if not activity.set(cres.obj):
+					self.clarify.insert(0, cres)
+
+					if consumed == 0:
+						break
+
+					elif activity.complete():
+						results.append(activity)
+						self.presetAircraft = activity
+
+						activity = None
+						consumed = 0
+				else:
+					consumed += 1
+
+			if activity and activity.complete():
+				results.append(activity)
+				self.presetAircraft = activity
+
+		# Extend unrecognized tokens
 		self.unknown.extend(self.clarify)
 
 		if self.unknown:
