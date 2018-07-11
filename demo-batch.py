@@ -1,4 +1,9 @@
 # -*- coding: utf-8 -*-
+#
+# Airbatch - Fast flight data recognition framework
+# Copyright (C) 2018 by Jan Max Meyer, Phorward Software Technologies
+#
+
 from browser import document
 import airbatch
 

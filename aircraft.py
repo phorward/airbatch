@@ -1,6 +1,11 @@
 #-*- coding: utf-8 -*-
-from recognizer import Recognizer
+#
+# Airbatch - Fast flight data recognition framework
+# Copyright (C) 2018 by Jan Max Meyer, Phorward Software Technologies
+#
 
+
+from recognizer import Recognizer
 
 class AircraftRecognizer(Recognizer):
 	"""

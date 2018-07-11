@@ -15,7 +15,7 @@ button {
 select.info {
     float: left;
     width: 33.3%;
-    height: 200px;
+    height: 120px;
 }
 
 table {
@@ -49,10 +49,19 @@ tbody#final
     border-bottom: 1px dashed black;
 }
 
-tr#construction-row
+tbody#construction
 {
     background-color: #aaaadd;
     opacity: 0.55;
+}
+
+tbody#construction tr:nth-child(even) {
+    background-color: #D0D0EC;
+}
+
+tr#construction-row
+{
+    background-color: #aaaadd;
 }
 
 tr#construction-row td
