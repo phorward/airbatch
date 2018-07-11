@@ -80,11 +80,20 @@ li#editor-col
 ul#editor-proposal
 {
     display: none;
+
+    background-color: white;
+    border: 1px solid black;
+    border-radius: 3px;
 }
 
 ul#editor-proposal li
 {
     cursor: pointer;
+    padding: 10px;
+}
+
+ul#editor-proposal li:nth-child(even) {
+    background-color: #ededed;
 }
 
 input
