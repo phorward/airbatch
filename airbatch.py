@@ -1,24 +1,451 @@
 # -*- coding: utf-8 -*-
 #
 # Airbatch - Fast flight data recognition framework
-# Copyright (C) 2018 by Jan Max Meyer, Phorward Software Technologies
+# Copyright (C) 2018, 2019 by Jan Max Meyer, Phorward Software Technologies
 #
 
-import datetime
-from recognizer import Recognizer, Result, TimeRecognizer, DurationRecognizer
-from aircraft import AircraftRecognizer, Aircraft, demoAircrafts
-from pilot import PilotRecognizer, Pilot, demoPilots
-from location import LocationRecognizer, Location, demoLocations
+import datetime, json
 
-R = Recognizer()
-tr = TimeRecognizer()
-dr = DurationRecognizer()
+try:
+	from browser import ajax
+except ModuleNotFoundError:
+	ajax = None
 
-ar = AircraftRecognizer(demoAircrafts)
-pr = PilotRecognizer(demoPilots)
-lr = LocationRecognizer(demoLocations)
-defaultLocation = demoLocations[0]
 
+# --- RECOGNIZER-----------------------------------------------------------------------------------
+
+class Result:
+	"""
+	Defines a recognizer result.
+	"""
+	def __init__(self, count, token, obj=None):
+		self.count = count
+		self.token = token
+		self.obj = obj
+
+	def commit(self, obj):
+		self.obj = obj
+		return self
+
+	def clone(self, obj = None):
+		if isinstance(obj, list):
+			ret = []
+
+			for x in obj:
+				ret.append(self.clone(x))
+
+			return ret
+
+		return Result(self.count, self.token, obj or self.obj)
+
+	def __str__(self):
+		return "'%s' => %s" % (self.token, str(self.obj) or "None")
+
+
+class Recognizer:
+	"""
+	Basic recognizer. It recognizes a token from the input stream and disregards whitespace
+	and other delimiters.
+	"""
+	factory = None
+
+	def __init__(self):
+		super().__init__()
+
+	def recognize(self, s):
+		count = 0
+		token = ""
+
+		for ch in s:
+			count += 1
+			if ch in " ,;\t":
+				if token:
+					break
+
+				continue
+
+			token += ch
+
+		return Result(count, token.lower())
+
+	def propose(self, s):
+		return self.recognize(s)
+
+
+class TimeRecognizer(Recognizer):
+	"""
+	Recognize a time.
+	"""
+	def recognize(self, s):
+		ret = super().recognize(s)
+		token = ret.token.replace(":", "")
+
+		if len(token) not in [3, 4, 5] or not all([ch.isdigit() for ch in token]):
+			return None
+
+		try:
+			res = datetime.datetime.now()
+			res = res.replace(hour=int(token[:-2]), minute=int(token[-2:]), second=0, microsecond=0)
+		except ValueError:
+			return None
+
+		ret.obj = res
+		return ret
+
+
+class DurationRecognizer(Recognizer):
+	"""
+	Recognize a duration.
+	"""
+
+	def recognize(self, s):
+		ret = super().recognize(s)
+
+		token = ret.token
+		if not token.startswith("+"):
+			return None
+
+		token = token[1:]
+
+		if token.count(":") == 1:
+			token = token.split(":", 1)
+			try:
+				mins = int(token[0]) * 60 + int(token[1])
+			except ValueError:
+				return None
+		else:
+			try:
+				mins = int(token)
+			except ValueError:
+				return None
+
+		return ret.commit(datetime.timedelta(minutes=mins))
+
+
+class ItemRecognizer(Recognizer):
+	"""
+	Basic item recognizer.
+	"""
+	itemFactory = None
+
+	def __init__(self, data, callback = None):
+		super().__init__()
+
+		if isinstance(data, str):
+			assert ajax
+			self.fetch(url=data, callback=callback)
+			data = None
+
+		self.items = data or []
+		if self.items:
+			self.prepare()
+
+			if callback:
+				callback(self)
+
+	def fetch(self, url, data = None, callback = None):
+		assert self.itemFactory
+
+		req = ajax.ajax()
+		req.bind("complete", self._fetchCallback)
+		req.callback = callback
+
+		# pass the arguments in the query string
+		req.open("POST", url, True)
+		req.set_header("content-type", "application/x-www-form-urlencoded")
+
+		req.send(data or {})
+
+	def prepare(self):
+		"""
+		Function to prepare the recognizer based on its loaded items.
+		:return:
+		"""
+		pass
+
+	def _fetchCallback(self, req):
+		assert req.status in [0, 200]
+		answ = json.loads(req.text)
+
+		for entry in answ["skellist"]:
+			self.items.append(self.itemFactory(entry))
+
+		self.prepare()
+
+		print("%s: %d items loaded" % (self.__class__.__name__, len(self.items)))
+
+		if req.callback:
+			req.callback(self)
+
+
+# --- AIRCRAFT-------------------------------------------------------------------------------------
+
+class Aircraft:
+	def __init__(self, key, regNo, type, seats = 1, compNo = None, kind = "glider", launcher = False, selfstart = False):
+		super().__init__()
+
+		self.key = key
+		self.regNo = regNo
+		self.compNo = compNo
+		self.type = type
+		self.seats = seats
+		assert kind in ["glider", "microlight", "motorglider"]
+		self.kind = kind
+		self.launcher = launcher
+		self.selfstart = selfstart
+
+	def __str__(self):
+		return "%s - %s" % (self.regNo, self.type)
+
+	@staticmethod
+	def fromServer(cls, entry):
+		return Aircraft(entry["key"], entry["reg"], entry["name"], entry["seats"], entry["compreg"],
+					entry["aircraftkind"], entry["is_launcher"], entry["is_selfstarter"])
+
+
+class AircraftRecognizer(ItemRecognizer):
+	"""
+	Recognize an aircraft by registration-no, competition-no or short reg no.
+	"""
+	itemFactory = Aircraft.fromServer
+
+	def recognize(self, s):
+		ret = super().recognize(s)
+
+		for aircraft in self.items:
+			if ret.token == aircraft.regNo.lower():
+				return ret.commit(aircraft)
+			elif aircraft.compNo and ret.token.lower() == aircraft.compNo.lower():
+				return ret.commit(aircraft)
+			elif ret.token.replace("-", "") == aircraft.regNo.lower().replace("-", ""):
+				return ret.commit(aircraft)
+			#elif ret.token.split("-", 1)[1] == aircraft.regNo.lower().split("-", 1)[1]:
+			#	return ret.commit(aircraft)
+			elif len(ret.token) == 2 and ret.token == aircraft.regNo[-2:].lower():
+				return ret.commit(aircraft)
+
+		return None
+
+	def propose(self, s):
+		ret = super().recognize(s)
+		res = []
+
+		for aircraft in self.items:
+			if aircraft.regNo.lower().startswith(ret.token):
+				res.append(aircraft)
+			elif aircraft.compNo and aircraft.compNo.lower().startswith(ret.token):
+				res.append(aircraft)
+			elif ret.token.replace("-", "") == aircraft.regNo.lower().replace("-", ""):
+				res.append(aircraft)
+			elif len(ret.token) == 2 and ret.token == aircraft.regNo[-2:].lower():
+				res.append(aircraft)
+			elif ret.token in aircraft.type.lower():
+				res.append(aircraft)
+
+		return ret.clone(res)
+
+
+demoAircrafts = [
+	Aircraft("1", "D-1234", "Libelle", compNo="YL"),
+	Aircraft("2", "D-2074", "ASK 13", seats=2),
+	Aircraft("3", "D-8984", "ASK 13", seats=2),
+	Aircraft("4", "D-5014", "Duo Discus", compNo="YX", seats=2),
+	Aircraft("5", "D-KYYA", "Arcus M", compNo="YA", seats=2, selfstart=True),
+	Aircraft("6", "D-MRMK", "Turbo Savage", seats=2, kind="microlight", launcher=True)
+]
+
+# --- PILOT ---------------------------------------------------------------------------------------
+
+class Pilot:
+	def __init__(self, key, lastName, firstName, nickName = None):
+		super().__init__()
+
+		self.key = key
+		self.firstName = firstName
+		self.lastName = lastName
+		self.nickName = nickName
+
+	def __str__(self):
+		return "%s, %s" % (self.lastName, self.firstName)
+
+	@staticmethod
+	def fromServer(cls, entry):
+		return Pilot(entry["key"], entry["lastname"], entry["firstname"], entry["nickname"])
+
+
+class PilotRecognizer(ItemRecognizer):
+	"""
+	Recognize a pilot, either by lastname, lastname+firstname or nickname.
+	"""
+	itemFactory = Pilot.fromServer
+
+	def prepare(self):
+		self.families = {}
+		self.nicks = {}
+
+		for pilot in self.items:
+			familyName = pilot.lastName.lower()
+			if familyName not in self.families:
+				self.families[familyName] = []
+
+			self.families[familyName].append(pilot)
+
+			if pilot.nickName:
+				nickName = pilot.nickName.lower()
+				self.nicks[nickName] = pilot
+
+	def _recognizePilots(self, s):
+		ret = super().recognize(s)
+
+		familyName = ret.token
+		family = None
+
+		if familyName not in self.families:
+			if familyName not in self.nicks:
+				for key in sorted(self.families.keys()):
+					if key.startswith(familyName):
+						family = self.families[key]
+						break
+
+				for key in sorted(self.nicks.keys()):
+					if key.startswith(familyName):
+						return ret.commit(self.nicks[key])
+			else:
+				return ret.commit(self.nicks[familyName])
+		else:
+			family = self.families[familyName]
+
+		if not family:
+			return None
+
+		try:
+			ret2 = super().recognize(s[ret.count:])
+			firstName = ret2.token
+		except:
+			firstName = None
+
+		pilot = family[0]
+		if len(family) == 1:
+			if firstName and pilot.firstName.lower().startswith(firstName):
+				return Result(ret.count + ret2.count, s[:ret.count + ret2.count], pilot)
+
+		elif firstName:
+			for p in family:
+				if p.firstName.lower().startswith(firstName):
+					return Result(ret.count + ret2.count, s[:ret.count + ret2.count], p)
+
+		if len(family) == 1:
+			return ret.commit(pilot)
+
+		return ret.clone(family)
+
+	def recognize(self, s):
+		ret = self._recognizePilots(s)
+		if not ret:
+			return None
+
+		if isinstance(ret, list):
+			return ret[0]
+
+		return ret
+
+	def propose(self, s):
+		return self._recognizePilots(s)
+
+
+demoPilots = [
+	Pilot("1", "Meier", "Max", nickName="Pille"),
+	Pilot("2", "Schmudel", "Rainer"),
+	Pilot("3", "Schielmann", "Peter", nickName="Puddy"),
+	Pilot("4", "Meier", "Horst"),
+	Pilot("5", "Ruhm", "Hannah"),
+	Pilot("6", "Starker", "Philipp")
+]
+
+# --- LOCATION ------------------------------------------------------------------------------------
+
+defaultLocation = None
+
+class Location():
+	def __init__(self, key, longName, shortName = None, icao = None):
+		super().__init__()
+
+		self.key = key
+		self.longName = longName
+		self.shortName = shortName
+		self.icao = icao
+
+	def __str__(self):
+		if self.icao:
+			return "%s (%s)" % (self.longName, self.icao)
+
+		return self.longName
+
+	@staticmethod
+	def fromServer(cls, entry):
+		return Location(entry["key"], entry["name"], entry["shortname"], entry["icao"])
+
+
+class LocationRecognizer(ItemRecognizer):
+	"""
+	Recognize a location, either by name, ICAO name or abbreviation.
+	"""
+	itemFactory = Location.fromServer
+
+	def prepare(self):
+		global defaultLocation
+		defaultLocation = self.items[0]
+
+		self.icaos = {}
+		self.shorts = {}
+
+		for a in self.items:
+			if a.icao:
+				self.icaos[a.icao.lower()] = a
+			if a.shortName:
+				self.shorts[a.shortName.lower()] = a
+
+	def recognize(self, s):
+		ret = super().recognize(s)
+
+		if ret.token in self.icaos:
+			return ret.commit(self.icaos[ret.token])
+
+		if ret.token in self.shorts:
+			return ret.commit(self.shorts[ret.token])
+
+		for a in self.items:
+			if ret.token in a.longName.lower():
+				return ret.commit(a)
+
+		return None
+
+	def propose(self, s):
+		ret = super().recognize(s)
+		res = []
+
+		if ret.token in self.icaos:
+			return ret.commit(self.icaos[ret.token])
+
+		if ret.token in self.shorts:
+			return ret.commit(self.shorts[ret.token])
+
+		for a in self.items:
+			if ret.token in a.longName.lower():
+				res.append(a)
+
+		return ret.clone(res)
+
+
+demoLocations = [
+	Location("1", "Iserlohn-Rheinermark", "rhmk"),
+	Location("2", "Iserlohn-Sümmern"),
+	Location("3", "Dortmund", "DTM", "EDLW"),
+	Location("4", "Meierberg"),
+	Location("5", "Altena-Hegenscheid")
+]
+
+# --- ACTIVITY ------------------------------------------------------------------------------------
 
 class Activity():
 	def __init__(self, aircraft = None, takeoff = None, touchdown = None, duration = None,
@@ -69,30 +496,57 @@ class Activity():
 		return False
 
 	def setTime(self, time):
+		print("setTime", time)
 		assert isinstance(time, datetime.datetime)
+
+		print("---")
+		print(self)
+		print("---")
+
+		ok = False
 
 		if not self.takeoff:
 			self.takeoff = time
 			if self.duration:
 				self.touchdown = self.takeoff + self.duration
 
-			return True
+			ok = True
 
-		elif not self.touchdown or self.link and self.touchdown == self.link.touchdown:
+		if (not self.touchdown
+			or self.touchdown == self.takeoff
+			or (self.link and self.link.touchdown == self.touchdown)):
 			self.touchdown = time
 
+			# flip takeoff and touchdown time
 			if self.touchdown < self.takeoff:
 				time = self.takeoff
 				self.takeoff = self.touchdown
 				self.touchdown = time
 
 			self.duration = self.touchdown - self.takeoff
-			return True
+			ok = True
 
-		return False
+		if self.link and (
+			not self.link.takeoff
+			or not self.link.touchdown
+			or self.link.takeoff == self.link.touchdown
+			or (self.link.takeoff == self.takeoff and self.link.touchdown == self.touchdown)):
+
+			self.link.link = None
+			ok = self.link.setTime(time)
+			self.link.link = self
+
+		return ok
 
 	def setDuration(self, duration):
+		print("setDuration", duration)
 		assert isinstance(duration, datetime.timedelta)
+
+		if self.link and not self.link.duration:
+			self.link.link = None
+			ret = self.link.setDuration(duration)
+			self.link.link = self
+			return ret
 
 		if self.duration:
 			return False
@@ -134,9 +588,19 @@ class Activity():
 		return False
 
 	def complete(self):
+		if self.link:
+			if not self.takeoff:
+				self.takeoff = self.link.takeoff
+			if not self.ltakeoff:
+				self.ltakeoff = self.link.ltakeoff
+			if self.duration:
+				self.touchdown = self.takeoff + self.duration
+
 		if self.cloneof:
 			if not self.pilot:
 				self.pilot = self.cloneof.pilot
+			if not self.copilot and self.cloneof.copilot:
+				self.copilot = self.cloneof.copilot
 			if not self.takeoff:
 				self.takeoff = self.cloneof.touchdown
 			if not self.ltakeoff:
@@ -184,37 +648,82 @@ class Activity():
 		        or (self.duration is obj or self.duration == obj))
 
 	def __str__(self):
-		txt = ""
-		if not self.complete():
-			txt += "!INCOMPLETE! "
+		#self.complete()
+		txt = str(self.aircraft)
 
-		txt += "%s   %s   %s   %s   %s   %s   %s   %s" % (self.aircraft, self.pilot, self.copilot or "",
-		                                                self.takeoff, self.ltakeoff, self.touchdown, self.ltouchdown,
-		                                                    self.duration)
+		txt += " (%s)" % "   ".join(
+			[str(i) for i in [
+				self.pilot, self.copilot or "",
+				self.takeoff, self.ltakeoff, self.touchdown, self.ltouchdown]
+			 		if i
+		])
+
+		if self.link:
+			self.link.link = None
+			txt += " linked to " + str(self.link)
+			self.link.link = self
+
+		if self.cloneof:
+			txt += " was cloned by " + str(self.cloneof)
+
 		return txt
 
+	def __repr__(self):
+		if not self.complete():
+			return ""
+
+		return "%s %s %s %s %s %s %s" % (
+			self.aircraft.regNo,
+			str(self.pilot),
+			str(self.copilot) if self.copilot else "",
+			self.takeoff.strftime("%H%M") if self.takeoff else None,
+			str(self.ltakeoff),
+			self.touchdown.strftime("%H%M") if self.touchdown else None,
+			str(self.ltouchdown)
+		)
+
 	def clone(self, link = None):
+		if link is None and self.link:
+			self.link.link = None
+			link = self.link.clone()
+			self.link.link = self
+
 		return Activity(aircraft = self.aircraft, link = link, cloneof = self)
 
 class Error():
-	def __init__(self, tokens, row = None):
+	def __init__(self, content, row = None):
 		super().__init__()
 
 		self.row = row
-		self.tokens = tokens
+		self.tokens = content if isinstance(content, list) else None
+		self.txt = content if isinstance(content, str) else None
 
 	def __str__(self):
-		return ", ".join([(str(res.obj) if res.obj else res.token + "?") for res in self.tokens])
+		return self.txt or ", ".join([(str(res.obj) if res.obj else res.token + "?") for res in self.tokens])
 
 class Processor():
 	def __init__(self):
 		super().__init__()
+
+		self.defaultRecognizer = Recognizer()
+
+		self.timeRecognizer = TimeRecognizer()
+		self.durationRecognizer = DurationRecognizer()
+
+		#self.aircraftRecognizer = AircraftRecognizer("/json/aircraft/list", self._aircraftsAvailable)
+		#self.pilotRecognizer = PilotRecognizer("/json/pilot/list", self._pilotsAvailable)
+		#self.locationRecognizer = LocationRecognizer("/json/place/list", self._locationsAvailable)
+
+		self.aircraftRecognizer = AircraftRecognizer(demoAircrafts, self._aircraftsAvailable)
+		self.pilotRecognizer = PilotRecognizer(demoPilots, self._pilotsAvailable)
+		self.locationRecognizer = LocationRecognizer(demoLocations, self._locationsAvailable)
 
 		self.presetLauncher = None
 		self.presetDate = None
 		self.presetAircraft = None
 		self.presetPilot = None
 		self.presetCopilot = None
+		self.presetLocation = None
 
 		self.unknown = []
 		self.clarify = []
@@ -222,6 +731,15 @@ class Processor():
 
 		self.activities = []
 		self.current = None
+
+	def _aircraftsAvailable(self, rec):
+		pass
+
+	def _pilotsAvailable(self, rec):
+		pass
+
+	def _locationsAvailable(self, rec):
+		pass
 
 	def reset(self, hard = True):
 		if hard:
@@ -230,6 +748,7 @@ class Processor():
 			self.presetAircraft = None
 			self.presetPilot = None
 			self.presetCopilot = None
+			self.presetLocation = None
 
 		self.unknown = []
 		self.clarify = []
@@ -237,18 +756,26 @@ class Processor():
 
 		self.activities = []
 		self.current = None
+
+	def canTowLaunch(self, a1, a2):
+		return a1.kind == "glider" and a2.launcher or a2.kind == "glider" and a1.launcher
 		
 	def extend(self, res):
+		print("extend", res)
+
 		if not isinstance(res, Result):
 			res = Result(len(str(res)), str(res), res)
 
 		self.tokens.append(res)
 
 		if isinstance(res.obj, Aircraft):
-			if not self.current:
-				self.current = Activity(res.obj)
-			else:
+			# Create activity on new aircraft, check if it can be linked.
+			if self.current and self.canTowLaunch(self.current.aircraft, res.obj):
+				print("Linking current activity with %s to %s" % (self.current.aircraft, res.obj))
 				self.current = Activity(res.obj, link=self.current)
+			else:
+				print("Creating new activity for %s" % res.obj)
+				self.current = Activity(res.obj)
 
 			self.activities.append(self.current)
 
@@ -264,7 +791,7 @@ class Processor():
 	def commit(self):
 		results = []
 
-		print(len(self.activities), [(str(res.obj) if res.obj else res.token) for res in self.clarify])
+		print("commit", len(self.activities), [(str(res.obj) if res.obj else res.token) for res in self.clarify])
 
 		if len(self.activities) == 0 and self.clarify:
 			if self.presetAircraft:
@@ -277,7 +804,12 @@ class Processor():
 						break
 
 				self.current.complete()
+
+				if self.current.link:
+					self.activities.append(self.current.link)
+
 				self.activities.append(self.current)
+
 			else:
 				first = True
 				for c in self.clarify[:]:
@@ -294,62 +826,9 @@ class Processor():
 							self.presetCopilot = c.obj
 							self.clarify.remove(c)
 
-		if len(self.activities) == 1:
-			launch = self.activities[0]
-
-			if not launch.complete():
-				if not launch.cloneof:
-					if self.presetAircraft and launch.aircraft is self.presetAircraft.aircraft:
-						launch.cloneof = self.presetAircraft
-						launch.complete()
-					elif self.presetLauncher and launch.aircraft is self.presetLauncher.aircraft:
-						launch.cloneof = self.presetLauncher
-						launch.complete()
-
-				if launch.takeoff:
-					if not launch.pilot:
-						launch.pilot = self.presetPilot
-					if not launch.copilot:
-						launch.copilot = self.presetCopilot
-
-					if launch.complete():
-						results.append(launch)
-					else:
-						self.clarify.extend(self.tokens)
-
-				if launch.aircraft.launcher:
-					self.presetAircraft = self.presetLauncher = launch
-				else:
-					self.presetAircraft = launch
-
-			else:
-				if launch.aircraft.kind == "glider" and not launch.aircraft.selfstart:
-					if self.presetLauncher:
-						llaunch = self.presetLauncher.clone(launch)
-						self.activities.insert(0, llaunch)
-						llaunch.complete()
-
-						for cres in self.clarify[:]:
-							if isinstance(cres.obj, datetime.datetime) and cres.obj >= launch.touchdown:
-								launch.touchdown = cres.obj
-								self.clarify.remove(cres)
-								launch.complete()
-
-					else:
-						print(launch)
-						results.append(launch)
-
-						self.presetAircraft = launch
-				else:
-					print(launch)
-					results.append(launch)
-
-					self.presetAircraft = launch
-
-		# No else!
-		if len(self.activities) > 1:
+		if self.activities:
 			if len(self.activities) > 2:
-				print("Too many launches per row, please spicify only two aircraft in total per row")
+				print("Too many launches per row, please specify only two aircraft in total per row")
 
 			for launch in self.activities:
 				ok = launch.complete()
@@ -375,33 +854,46 @@ class Processor():
 				results.append(launch)
 
 		# OK, now clarify the rest, if necessary
-		if self.clarify and len(results) == 1:
+		if self.clarify:
 			activity = None
 			consumed = 0
 
 			while self.clarify:
 				cres = self.clarify.pop(0)
 
-				if activity is None:
+				if activity is None and results:
+					print("Cloning %s" % results[-1].aircraft)
 					activity = results[-1].clone()
 
-				if not activity.set(cres.obj):
+					if activity.link:
+						print("   Linked %s" % activity.link.aircraft)
+
+
+				if not activity or not activity.set(cres.obj):
 					self.clarify.insert(0, cres)
 
 					if consumed == 0:
 						break
 
-					elif activity.complete():
+					if activity.complete():
+						if activity.link:
+							results.append(activity.link)
+
 						results.append(activity)
 						self.presetAircraft = activity
 
 						activity = None
 						consumed = 0
+
 				else:
 					consumed += 1
 
 			if activity and activity.complete():
+				if activity.link:
+					results.append(activity.link)
+
 				results.append(activity)
+
 				self.presetAircraft = activity
 
 		# Extend unrecognized tokens
@@ -411,6 +903,10 @@ class Processor():
 			print("Unknown:", [(str(res.obj) if res.obj else res.token) for res in self.unknown])
 			results.append(Error(self.unknown))
 
+		for act in results:
+			if not act.complete():
+				results.append(Error(str(act)))
+
 		self.reset(False)
 
 		return results
@@ -419,22 +915,23 @@ class Processor():
 		results = []
 		print(txt)
 
-		idx = 0
-		row = 0
-		for s in txt.split("\n"):
-			row += 1
+		for row, s in enumerate(txt.split("\n")):
+			print("--- %d ---" % row)
 			s = s.strip()
-			if not s:
-				self.presetAircraft = None
-				self.presetLauncher = None
-				self.presetPilot = None
-				self.presetCopilot = None
-				continue
+
+			#if not s:
+			#	self.presetAircraft = None
+			#	self.presetLauncher = None
+			#	self.presetPilot = None
+			#	self.presetCopilot = None
+			#	continue
 
 			while s:
 				res = None
 
-				for r in [tr, dr, pr, ar, lr]:
+				for r in [self.timeRecognizer, self.durationRecognizer,
+						  	self.pilotRecognizer, self.aircraftRecognizer,
+						  		self.locationRecognizer]:
 					res = r.recognize(s)
 					if res:
 						break
@@ -442,7 +939,7 @@ class Processor():
 				#print(res)
 
 				if res is None:
-					res = R.recognize(s)
+					res = self.defaultRecognizer.recognize(s)
 					s = s[res.count:]
 					self.unknown.append(res)
 					self.tokens.append(res)
@@ -456,12 +953,11 @@ class Processor():
 			rowResults = self.commit()
 
 			if rowResults:
-				print("--- %d ---" % idx)
-				idx += 1
-
 				for res in rowResults:
 					res.row = row
 
 				results.extend(rowResults)
 
 		return results
+
+print("AIRBATCH LOADED")

@@ -4,24 +4,17 @@
     <meta charset="UTF-8">
     <title>Air Batch - Batch DEMO</title>
 
-    <script src="Brython-3.6.2/brython.js"></script>
-    <script src="Brython-3.6.2/brython_stdlib.js"></script>
+	<script src="Brython-3.7.1/brython.js"></script>
+	<script src="Brython-3.7.1/brython_stdlib.js"></script>
 
-    <link rel="stylesheet" type="text/css" href="demo.css">
+	<link rel="stylesheet" type="text/css" href="airbatch.css">
 </head>
-<body onload="brython()">
-    <script type="text/python" src="airbatch.py"></script>
-
+<body onload="brython({pythonpath: ['.', '/static/py/']})">
     <select size="5" id="aircraft" class="info aircraft"></select>
     <select size="5" id="pilot" class="info pilot"></select>
     <select size="5" id="location" class="info location"></select>
 
-    <textarea id="editor">MK pille
-1029 1035 1218 YX meier, horst schmu  rhmk süm
-MK pille 1035 +7 YL puddy +30 rhmk rhmk
-D-KYYA meier, horst  ruhm   1145 1213   edlw rhmk
-DMRMK meier sta 1150 1230 süm hegenscheid
-    </textarea>
+    <textarea id="editor"></textarea>
     <button id="btn-parse">Parse</button>
 
     <table id="result">

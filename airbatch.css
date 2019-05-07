@@ -1,6 +1,11 @@
+html, body {
+  font-family: sans-serif;
+  font-size: 14pt;
+}
+
 textarea {
     font-family: consolas, courier;
-    font-size: 14pt;
+    font-size: 15pt;
     font-weight: bold;
     color: #111144;
 
@@ -8,7 +13,7 @@ textarea {
     min-height: 300px;
 }
 
-button {
+button#btn-parse {
     width: 100%;
 }
 
@@ -47,21 +52,26 @@ ul {
 tbody#final
 {
     border-bottom: 1px dashed black;
+    background-color: #aaaadd;
+}
+
+tbody#final tr:nth-child(even) {
+  background-color: #D0D0EC;
 }
 
 tbody#construction
 {
-    background-color: #aaaadd;
+    background-color: #b3ffb3;
     opacity: 0.55;
 }
 
 tbody#construction tr:nth-child(even) {
-    background-color: #D0D0EC;
+  background-color: #ccffcc;
 }
 
 tr#construction-row
 {
-    background-color: #aaaadd;
+    background-color: #ffffb3;
 }
 
 tr#construction-row td
@@ -139,3 +149,45 @@ span.close, span.commit
     cursor: pointer;
 }
 
+/* Tabs */
+
+ul.tabcontrol-pages li.tabcontrol-page {
+  font-weight: 700;
+  font-size: 18px;
+  display: block;
+  float: left;
+  min-width: 200px;
+  padding: 25px 10px;
+  color: #757575;
+  cursor: pointer;
+  text-decoration: none;
+  text-align: center;
+  background: #ddd;
+  border: 1px solid #ccc;
+  border-bottom: none;
+  margin-bottom: -1px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  overflow: hidden;
+  z-index: 6;
+  box-sizing: border-box;
+}
+
+ul.tabcontrol-pages li.tabcontrol-page.is-active {
+  background: #fff;
+  z-index: 10;
+  position: relative;
+
+}
+
+ul.tabcontrol-bodies {
+  position: relative;
+  width: 100%;
+  border: 1px solid #ccc;
+  clear: both;
+  padding: 30px 20px 20px 20px;
+  background-color: #fff;
+  box-sizing: border-box;
+  overflow: auto;
+
+}
