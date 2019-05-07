@@ -3,6 +3,18 @@
 # Airbatch - Fast flight data recognition framework
 # Copyright (C) 2018, 2019 by Jan Max Meyer, Phorward Software Technologies
 #
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as published
+# by the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU Affero General Public License for more details.
+#
+# You should have received a copy of the GNU Affero General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import datetime, json
 
@@ -197,6 +209,9 @@ class Aircraft:
 	def __str__(self):
 		return "%s - %s" % (self.regNo, self.type)
 
+	def __repr__(self):
+		return self.regNo
+
 	@staticmethod
 	def fromServer(cls, entry):
 		return Aircraft(entry["key"], entry["reg"], entry["name"], entry["seats"], entry["compreg"],
@@ -246,12 +261,9 @@ class AircraftRecognizer(ItemRecognizer):
 
 
 demoAircrafts = [
-	Aircraft("1", "D-1234", "Libelle", compNo="YL"),
-	Aircraft("2", "D-2074", "ASK 13", seats=2),
-	Aircraft("3", "D-8984", "ASK 13", seats=2),
-	Aircraft("4", "D-5014", "Duo Discus", compNo="YX", seats=2),
-	Aircraft("5", "D-KYYA", "Arcus M", compNo="YA", seats=2, selfstart=True),
-	Aircraft("6", "D-MRMK", "Turbo Savage", seats=2, kind="microlight", launcher=True)
+	Aircraft("1", "D-1234", "Std. Libelle", compNo="YY"),
+	Aircraft("2", "D-1337", "Duo Discus", seats=2, compNo="YX"),
+	Aircraft("3", "D-MLOL", "Turbo Savage", seats=2, kind="microlight", launcher=True)
 ]
 
 # --- PILOT ---------------------------------------------------------------------------------------
@@ -267,6 +279,9 @@ class Pilot:
 
 	def __str__(self):
 		return "%s, %s" % (self.lastName, self.firstName)
+
+	def __repr__(self):
+		return str(self)
 
 	@staticmethod
 	def fromServer(cls, entry):
@@ -354,12 +369,9 @@ class PilotRecognizer(ItemRecognizer):
 
 
 demoPilots = [
-	Pilot("1", "Meier", "Max", nickName="Pille"),
-	Pilot("2", "Schmudel", "Rainer"),
-	Pilot("3", "Schielmann", "Peter", nickName="Puddy"),
-	Pilot("4", "Meier", "Horst"),
-	Pilot("5", "Ruhm", "Hannah"),
-	Pilot("6", "Starker", "Philipp")
+	Pilot("1", "Major", "Max"),
+	Pilot("2", "Haggard", "Hannah"),
+	Pilot("3", "Peter", "Pielman", nickName="Puddy")
 ]
 
 # --- LOCATION ------------------------------------------------------------------------------------
@@ -378,6 +390,12 @@ class Location():
 	def __str__(self):
 		if self.icao:
 			return "%s (%s)" % (self.longName, self.icao)
+
+		return self.longName
+
+	def __repr__(self):
+		if self.icao:
+			return self.icao
 
 		return self.longName
 
@@ -438,11 +456,11 @@ class LocationRecognizer(ItemRecognizer):
 
 
 demoLocations = [
-	Location("1", "Iserlohn-Rheinermark", "rhmk"),
-	Location("2", "Iserlohn-Sümmern"),
-	Location("3", "Dortmund", "DTM", "EDLW"),
-	Location("4", "Meierberg"),
-	Location("5", "Altena-Hegenscheid")
+	Location("1", "Rhinowmark"),
+	Location("2", "Summern"),
+	Location("3", "Hangsen"),
+	Location("4", "Dusseldorf", "DUS", "EDDL"),
+	Location("5", "Finkenwarner")
 ]
 
 # --- ACTIVITY ------------------------------------------------------------------------------------
@@ -499,9 +517,9 @@ class Activity():
 		print("setTime", time)
 		assert isinstance(time, datetime.datetime)
 
-		print("---")
-		print(self)
-		print("---")
+		#print("---")
+		#print(self)
+		#print("---")
 
 		ok = False
 
@@ -563,11 +581,13 @@ class Activity():
 
 	def setLocation(self, location):
 		assert isinstance(location, Location)
-		if not self.ltakeoff:
-			self.ltakeoff = location
-			return True
+		print("setLocation", location)
 
-		elif not self.ltouchdown:
+		if self.takeoff and not self.duration:
+			self.ltakeoff = location
+			self.ltouchdown = defaultLocation
+			return True
+		elif self.touchdown and self.duration:
 			self.ltouchdown = location
 			return True
 
@@ -604,7 +624,7 @@ class Activity():
 			if not self.takeoff:
 				self.takeoff = self.cloneof.touchdown
 			if not self.ltakeoff:
-				self.ltakeoff = self.cloneof.ltakeoff
+				self.ltakeoff = self.cloneof.ltouchdown
 
 			if self.duration:
 				self.touchdown = self.takeoff + self.duration
@@ -625,15 +645,11 @@ class Activity():
 		if self.takeoff and self.touchdown:
 			self.duration = self.touchdown - self.takeoff
 
-		if self.ltakeoff and not self.ltouchdown:
-			self.setLocation(self.ltakeoff)
-		elif not self.ltakeoff:
-			if self.link and self.link.ltakeoff:
-				self.setLocation(self.link.ltakeoff)
-				self.setLocation(self.link.ltouchdown or self.ltakeoff)
+		if not self.ltakeoff:
+			self.ltakeoff = defaultLocation
 
-			self.setLocation(defaultLocation)
-			self.setLocation(defaultLocation)
+		if not self.ltouchdown:
+			self.ltouchdown = self.ltakeoff
 
 		return self.aircraft and self.pilot and self.takeoff and self.touchdown and self.ltakeoff and self.ltouchdown
 
@@ -674,19 +690,18 @@ class Activity():
 
 		return "%s %s %s %s %s %s %s" % (
 			self.aircraft.regNo,
-			str(self.pilot),
-			str(self.copilot) if self.copilot else "",
+			repr(self.pilot),
+			("  " + repr(self.copilot)) if self.copilot else "",
 			self.takeoff.strftime("%H%M") if self.takeoff else None,
-			str(self.ltakeoff),
+			repr(self.ltakeoff),
 			self.touchdown.strftime("%H%M") if self.touchdown else None,
-			str(self.ltouchdown)
+			repr(self.ltouchdown)
 		)
 
 	def clone(self, link = None):
 		if link is None and self.link:
-			self.link.link = None
-			link = self.link.clone()
-			self.link.link = self
+			if self.link.aircraft.launcher:
+				link = self.link.clone()
 
 		return Activity(aircraft = self.aircraft, link = link, cloneof = self)
 
@@ -700,6 +715,9 @@ class Error():
 
 	def __str__(self):
 		return self.txt or ", ".join([(str(res.obj) if res.obj else res.token + "?") for res in self.tokens])
+
+	def __repr__(self):
+		return "#" + str(self)
 
 class Processor():
 	def __init__(self):
@@ -850,7 +868,7 @@ class Processor():
 				if not ok:
 					continue
 
-				print(launch)
+				#print(launch)
 				results.append(launch)
 
 		# OK, now clarify the rest, if necessary
@@ -862,11 +880,11 @@ class Processor():
 				cres = self.clarify.pop(0)
 
 				if activity is None and results:
-					print("Cloning %s" % results[-1].aircraft)
+					print("Cloning %s" % repr(results[-1].aircraft))
 					activity = results[-1].clone()
 
 					if activity.link:
-						print("   Linked %s" % activity.link.aircraft)
+						print("   Linked %s" % repr(activity.link.aircraft))
 
 
 				if not activity or not activity.set(cres.obj):
@@ -899,13 +917,18 @@ class Processor():
 		# Extend unrecognized tokens
 		self.unknown.extend(self.clarify)
 
-		if self.unknown:
-			print("Unknown:", [(str(res.obj) if res.obj else res.token) for res in self.unknown])
-			results.append(Error(self.unknown))
-
 		for act in results:
 			if not act.complete():
 				results.append(Error(str(act)))
+			else:
+				if act.aircraft.launcher:
+					self.presetLauncher = act
+
+				self.presetAircraft = act
+
+		if self.unknown:
+			print("Unknown:", [(str(res.obj) if res.obj else res.token) for res in self.unknown])
+			results.append(Error(self.unknown))
 
 		self.reset(False)
 
@@ -961,3 +984,17 @@ class Processor():
 		return results
 
 print("AIRBATCH LOADED")
+
+if __name__ == "__main__":
+	proc = Processor()
+
+	for i, launch in enumerate(proc.parse("""
+OL major YX hagg puddy 1010 +5 +1:30
+1219 +7 +2:20
+
+OL puddy major 1500 1510 Hangsen
++3 +5
+1530 Hangsen 1540""")):
+		print("%d. %s" % (i + 1, repr(launch)))
+
+
