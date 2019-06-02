@@ -59,7 +59,7 @@ class Recognizer:
 	Basic recognizer. It recognizes a token from the input stream and disregards whitespace
 	and other delimiters.
 	"""
-	factory = None
+	ignoreChars = " ,;\t"
 
 	def __init__(self):
 		super().__init__()
@@ -70,7 +70,7 @@ class Recognizer:
 
 		for ch in s:
 			count += 1
-			if ch in " ,;\t":
+			if ch in self.ignoreChars:
 				if token:
 					break
 
@@ -260,12 +260,6 @@ class AircraftRecognizer(ItemRecognizer):
 		return ret.clone(res)
 
 
-demoAircrafts = [
-	Aircraft("1", "D-1234", "Std. Libelle", compNo="YY"),
-	Aircraft("2", "D-1337", "Duo Discus", seats=2, compNo="YX"),
-	Aircraft("3", "D-MLOL", "Turbo Savage", seats=2, kind="microlight", launcher=True)
-]
-
 # --- PILOT ---------------------------------------------------------------------------------------
 
 class Pilot:
@@ -276,6 +270,13 @@ class Pilot:
 		self.firstName = firstName
 		self.lastName = lastName
 		self.nickName = nickName
+
+		self.tokens = []
+		if nickName:
+			self.tokens.append(nickName.lower())
+
+		self.tokens.extend([x.lower() for x in lastName.split(" ")])
+		self.tokens.extend([x.lower() for x in firstName.split(" ")])
 
 	def __str__(self):
 		return "%s, %s" % (self.lastName, self.firstName)
@@ -294,65 +295,62 @@ class PilotRecognizer(ItemRecognizer):
 	"""
 	itemFactory = Pilot.fromServer
 
+	def __init__(self, *args, **kwargs):
+		self.ignoreChars += "-"
+		self.startToken = {}
+
+		super().__init__(*args, **kwargs)
+
 	def prepare(self):
-		self.families = {}
-		self.nicks = {}
-
 		for pilot in self.items:
-			familyName = pilot.lastName.lower()
-			if familyName not in self.families:
-				self.families[familyName] = []
-
-			self.families[familyName].append(pilot)
-
-			if pilot.nickName:
-				nickName = pilot.nickName.lower()
-				self.nicks[nickName] = pilot
+			for entry in pilot.tokens:
+				if entry not in self.startToken:
+					self.startToken[entry] = [pilot]
+				else:
+					self.startToken[entry].append(pilot)
 
 	def _recognizePilots(self, s):
 		ret = super().recognize(s)
+		count = ret.count
 
-		familyName = ret.token
-		family = None
-
-		if familyName not in self.families:
-			if familyName not in self.nicks:
-				for key in sorted(self.families.keys()):
-					if key.startswith(familyName):
-						family = self.families[key]
-						break
-
-				for key in sorted(self.nicks.keys()):
-					if key.startswith(familyName):
-						return ret.commit(self.nicks[key])
-			else:
-				return ret.commit(self.nicks[familyName])
+		if ret.token in self.startToken:
+			candidates = self.startToken[ret.token]
 		else:
-			family = self.families[familyName]
+			candidates = []
+			for entry, pilots in self.startToken.items():
+				if entry.startswith(ret.token):
+					candidates.extend(pilots)
 
-		if not family:
+		if not candidates:
 			return None
 
-		try:
-			ret2 = super().recognize(s[ret.count:])
-			firstName = ret2.token
-		except:
-			firstName = None
+		while candidates:
+			try:
+				ret = super().recognize(s[count:])
+			except:
+				break
 
-		pilot = family[0]
-		if len(family) == 1:
-			if firstName and pilot.firstName.lower().startswith(firstName):
-				return Result(ret.count + ret2.count, s[:ret.count + ret2.count], pilot)
+			test = candidates[:]
 
-		elif firstName:
-			for p in family:
-				if p.firstName.lower().startswith(firstName):
-					return Result(ret.count + ret2.count, s[:ret.count + ret2.count], p)
+			for pilot in candidates:
+				if ret.token not in pilot.tokens:
+					if not any([entry.startswith(ret.token) for entry in pilot.tokens]):
+						test.remove(pilot)
 
-		if len(family) == 1:
-			return ret.commit(pilot)
+			if not test:
+				break
 
-		return ret.clone(family)
+			candidates = test
+			count += ret.count
+
+
+		ret.token = s[:count]
+		ret.count = count
+
+		if len(candidates) == 1:
+			return ret.commit(candidates[0])
+
+		return ret.clone(candidates)
 
 	def recognize(self, s):
 		ret = self._recognizePilots(s)
@@ -367,12 +365,6 @@ class PilotRecognizer(ItemRecognizer):
 	def propose(self, s):
 		return self._recognizePilots(s)
 
-
-demoPilots = [
-	Pilot("1", "Major", "Max"),
-	Pilot("2", "Haggard", "Hannah"),
-	Pilot("3", "Peter", "Pielman", nickName="Puddy")
-]
 
 # --- LOCATION ------------------------------------------------------------------------------------
 
@@ -454,14 +446,6 @@ class LocationRecognizer(ItemRecognizer):
 
 		return ret.clone(res)
 
-
-demoLocations = [
-	Location("1", "Rhinowmark"),
-	Location("2", "Summern"),
-	Location("3", "Hangsen"),
-	Location("4", "Dusseldorf", "DUS", "EDDL"),
-	Location("5", "Finkenwarner")
-]
 
 # --- ACTIVITY ------------------------------------------------------------------------------------
 
@@ -581,7 +565,7 @@ class Activity():
 
 	def setLocation(self, location):
 		assert isinstance(location, Location)
-		print("setLocation", location)
+		#print("setLocation", location)
 
 		if self.takeoff and not self.duration:
 			self.ltakeoff = location
@@ -720,7 +704,7 @@ class Error():
 		return "#" + str(self)
 
 class Processor():
-	def __init__(self):
+	def __init__(self, aircrafts, pilots, locations):
 		super().__init__()
 
 		self.defaultRecognizer = Recognizer()
@@ -728,13 +712,9 @@ class Processor():
 		self.timeRecognizer = TimeRecognizer()
 		self.durationRecognizer = DurationRecognizer()
 
-		#self.aircraftRecognizer = AircraftRecognizer("/json/aircraft/list", self._aircraftsAvailable)
-		#self.pilotRecognizer = PilotRecognizer("/json/pilot/list", self._pilotsAvailable)
-		#self.locationRecognizer = LocationRecognizer("/json/place/list", self._locationsAvailable)
-
-		self.aircraftRecognizer = AircraftRecognizer(demoAircrafts, self._aircraftsAvailable)
-		self.pilotRecognizer = PilotRecognizer(demoPilots, self._pilotsAvailable)
-		self.locationRecognizer = LocationRecognizer(demoLocations, self._locationsAvailable)
+		self.aircraftRecognizer = AircraftRecognizer(aircrafts, self._aircraftsAvailable)
+		self.pilotRecognizer = PilotRecognizer(pilots, self._pilotsAvailable)
+		self.locationRecognizer = LocationRecognizer(locations, self._locationsAvailable)
 
 		self.presetLauncher = None
 		self.presetDate = None
@@ -986,15 +966,43 @@ class Processor():
 print("AIRBATCH LOADED")
 
 if __name__ == "__main__":
-	proc = Processor()
+	import sys
 
-	for i, launch in enumerate(proc.parse("""
-OL major YX hagg puddy 1010 +5 +1:30
-1219 +7 +2:20
+	aircrafts = [
+		Aircraft("1", "D-1234", "Std. Libelle", compNo="YY"),
+		Aircraft("2", "D-1337", "Duo Discus", seats=2, compNo="YX"),
+		Aircraft("3", "D-MLOL", "Turbo Savage", seats=2, kind="microlight", launcher=True)
+	]
 
-OL puddy major 1500 1510 Hangsen
-+3 +5
-1530 Hangsen 1540""")):
-		print("%d. %s" % (i + 1, repr(launch)))
+	pilots = [
+		Pilot("1", "Major", "Jan Max"),
+		Pilot("2", "Haggard", "Hannah"),
+		Pilot("3", "Peter", "Pielman", nickName="Puddy")
+	]
 
+	locations = [
+		Location("1", "Rhinowmark"),
+		Location("2", "Summern"),
+		Location("3", "Hangsen"),
+		Location("4", "Dusseldorf", "DUS", "EDDL"),
+		Location("5", "Finkenwarner")
+	]
+
+	p = Processor(aircrafts, pilots, locations)
+
+	if len(sys.argv) < 2:
+		while True:
+			s = input("> ")
+			if not s:
+				sys.exit(0)
+
+			r = p.parse(s)
+			for entry in r:
+				print("< %s" % repr(entry))
+	else:
+		for s in sys.argv[1:]:
+			print("> %s" % s)
+			r = p.parse(s)
+			for entry in r:
+				print("< %s" % repr(entry))
 
