@@ -61,8 +61,9 @@ class Recognizer:
 	"""
 	ignoreChars = " ,;\t"
 
-	def __init__(self):
+	def __init__(self, processor):
 		super().__init__()
+		self.processor = processor
 
 	def recognize(self, s):
 		count = 0
@@ -96,8 +97,18 @@ class TimeRecognizer(Recognizer):
 			return None
 
 		try:
-			res = datetime.datetime.now()
-			res = res.replace(hour=int(token[:-2]), minute=int(token[-2:]), second=0, microsecond=0)
+			res = datetime.datetime(
+				self.processor.presetDate.year,
+				self.processor.presetDate.month,
+				self.processor.presetDate.day
+			)
+
+			res = res.replace(
+					hour=int(token[:-2]),
+					minute=int(token[-2:]),
+					second=0,
+					microsecond=0
+			)
 		except ValueError:
 			return None
 
@@ -134,14 +145,50 @@ class DurationRecognizer(Recognizer):
 		return ret.commit(datetime.timedelta(minutes=mins))
 
 
+
+class DateRecognizer(Recognizer):
+	"""
+	Recognize a date.
+	"""
+
+	def recognize(self, s):
+		ret = super().recognize(s)
+
+		date = None
+		for fmt in ["%d.%m.%Y", "%d.%m.%y", "%d.%m.", "%d."]:
+			try:
+				date = datetime.datetime.strptime(ret.token, fmt)
+				if fmt.count("%") < 2:
+					date = date.replace(month=datetime.datetime.utcnow().month)
+
+				if fmt.count("%") < 3:
+					date = date.replace(year=datetime.datetime.utcnow().year)
+
+				break
+
+			except:
+				continue
+
+		if date is None:
+			return None
+
+		date = datetime.date(date.year, date.month, date.day)
+
+		# When a date is set, set current preset date and delete aircraft preset
+		self.processor.presetDate = date
+		self.processor.presetAircraft = None
+
+		return ret.commit(date)
+
+
 class ItemRecognizer(Recognizer):
 	"""
 	Basic item recognizer.
 	"""
 	itemFactory = None
 
-	def __init__(self, data, callback = None):
-		super().__init__()
+	def __init__(self, processor, data, callback = None):
+		super().__init__(processor)
 
 		if isinstance(data, str):
 			assert ajax
@@ -272,6 +319,10 @@ class Pilot:
 		self.nickName = nickName
 
 		self.tokens = []
+
+		if key is None:
+			return
+
 		if nickName:
 			self.tokens.append(nickName.lower())
 
@@ -279,6 +330,9 @@ class Pilot:
 		self.tokens.extend([x.lower() for x in firstName.split(" ")])
 
 	def __str__(self):
+		if self.key is None:
+			return ""
+
 		return "%s, %s" % (self.lastName, self.firstName)
 
 	def __repr__(self):
@@ -289,6 +343,9 @@ class Pilot:
 		return Pilot(entry["key"], entry["lastname"], entry["firstname"], entry["nickname"])
 
 
+theEmptyPilot = Pilot(None, None, None)
+
+
 class PilotRecognizer(ItemRecognizer):
 	"""
 	Recognize a pilot, either by lastname, lastname+firstname or nickname.
@@ -296,7 +353,6 @@ class PilotRecognizer(ItemRecognizer):
 	itemFactory = Pilot.fromServer
 
 	def __init__(self, *args, **kwargs):
-		self.ignoreChars += "-"
 		self.startToken = {}
 
 		super().__init__(*args, **kwargs)
@@ -313,6 +369,10 @@ class PilotRecognizer(ItemRecognizer):
 		ret = super().recognize(s)
 		count = ret.count
 
+		if ret.token in "-/%":
+			global theEmptyPilot
+			return ret.commit(theEmptyPilot)
+
 		if ret.token in self.startToken:
 			candidates = self.startToken[ret.token]
 		else:
@@ -327,6 +387,8 @@ class PilotRecognizer(ItemRecognizer):
 		while candidates:
 			try:
 				ret = super().recognize(s[count:])
+				if not ret.token.strip():
+					break
 			except:
 				break
 
@@ -368,8 +430,6 @@ class PilotRecognizer(ItemRecognizer):
 
 # --- LOCATION ------------------------------------------------------------------------------------
 
-defaultLocation = None
-
 class Location():
 	def __init__(self, key, longName, shortName = None, icao = None):
 		super().__init__()
@@ -403,8 +463,7 @@ class LocationRecognizer(ItemRecognizer):
 	itemFactory = Location.fromServer
 
 	def prepare(self):
-		global defaultLocation
-		defaultLocation = self.items[0]
+		self.processor.presetLocation = self.items[0]
 
 		self.icaos = {}
 		self.shorts = {}
@@ -450,12 +509,14 @@ class LocationRecognizer(ItemRecognizer):
 # --- ACTIVITY ------------------------------------------------------------------------------------
 
 class Activity():
-	def __init__(self, aircraft = None, takeoff = None, touchdown = None, duration = None,
+	def __init__(self, processor, aircraft = None, date = None, takeoff = None, touchdown = None, duration = None,
 					pilot = None, copilot = None, ltakeoff = None, ltouchdown = None,
 	                    note = None, link = None, cloneof = None):
 
+		self.processor = processor
 		self.row = 0
 
+		self.date = date
 		self.aircraft = aircraft
 		self.takeoff = takeoff
 		self.touchdown = touchdown
@@ -487,15 +548,30 @@ class Activity():
 	def setPilot(self, pilot):
 		assert isinstance(pilot, Pilot)
 		assert self.aircraft
+		global theEmptyPilot
 
 		if self.aircraft.seats >= 1 and self.pilot is None:
 			self.pilot = pilot
 			return True
-		elif self.aircraft.seats == 2 and self.copilot is None:
+		elif self.aircraft.seats == 2 and (self.copilot is None or pilot is theEmptyPilot):
+			if pilot is self.pilot:
+				return False
+
 			self.copilot = pilot
 			return True
 
 		return False
+
+	def setDate(self, date):
+		if self.date:
+			return False
+
+		if isinstance(date, datetime.datetime):
+			date = datetime.date(date.year, date.month, date.day)
+
+		assert isinstance(date, datetime.date)
+		self.date = date
+		return True
 
 	def setTime(self, time):
 		print("setTime", time)
@@ -538,6 +614,8 @@ class Activity():
 			ok = self.link.setTime(time)
 			self.link.link = self
 
+		self.setDate(self.touchdown)
+
 		return ok
 
 	def setDuration(self, duration):
@@ -567,11 +645,12 @@ class Activity():
 		assert isinstance(location, Location)
 		#print("setLocation", location)
 
-		if self.takeoff and not self.duration:
+		if self.ltakeoff is None and self.takeoff and not self.duration:
 			self.ltakeoff = location
-			self.ltouchdown = defaultLocation
+			self.ltouchdown = self.processor.presetLocation
+
 			return True
-		elif self.touchdown and self.duration:
+		elif (self.ltouchdown is None or self.ltouchdown is self.processor.presetLocation) and self.touchdown and self.duration:
 			self.ltouchdown = location
 			return True
 
@@ -584,6 +663,8 @@ class Activity():
 			return self.setPilot(attr)
 		elif isinstance(attr, datetime.datetime):
 			return self.setTime(attr)
+		elif isinstance(attr, datetime.date):
+			return self.setDate(attr)
 		elif isinstance(attr, datetime.timedelta):
 			return self.setDuration(attr)
 		elif isinstance(attr, Location):
@@ -603,8 +684,10 @@ class Activity():
 		if self.cloneof:
 			if not self.pilot:
 				self.pilot = self.cloneof.pilot
-			if not self.copilot and self.cloneof.copilot:
-				self.copilot = self.cloneof.copilot
+
+				if not self.copilot and self.cloneof.copilot:
+					self.copilot = self.cloneof.copilot
+
 			if not self.takeoff:
 				self.takeoff = self.cloneof.touchdown
 			if not self.ltakeoff:
@@ -630,7 +713,7 @@ class Activity():
 			self.duration = self.touchdown - self.takeoff
 
 		if not self.ltakeoff:
-			self.ltakeoff = defaultLocation
+			self.ltakeoff = self.processor.presetLocation
 
 		if not self.ltouchdown:
 			self.ltouchdown = self.ltakeoff
@@ -672,10 +755,11 @@ class Activity():
 		if not self.complete():
 			return ""
 
-		return "%s %s %s %s %s %s %s" % (
+		return "%s %s %s %s %s %s %s %s" % (
+			self.takeoff.strftime("%d.%m.%Y"),
 			self.aircraft.regNo,
 			repr(self.pilot),
-			("  " + repr(self.copilot)) if self.copilot else "",
+			("  " + repr(self.copilot)) if self.copilot and self.copilot is not theEmptyPilot else "",
 			self.takeoff.strftime("%H%M") if self.takeoff else None,
 			repr(self.ltakeoff),
 			self.touchdown.strftime("%H%M") if self.touchdown else None,
@@ -687,7 +771,13 @@ class Activity():
 			if self.link.aircraft.launcher:
 				link = self.link.clone()
 
-		return Activity(aircraft = self.aircraft, link = link, cloneof = self)
+		return Activity(
+			self.processor,
+			aircraft = self.aircraft,
+			date = self.date,
+			link = link,
+			cloneof = self
+		)
 
 class Error():
 	def __init__(self, content, row = None):
@@ -704,18 +794,37 @@ class Error():
 		return "#" + str(self)
 
 class Processor():
-	def __init__(self, aircrafts, pilots, locations):
+	def __init__(self, aircrafts = None, pilots = None, locations = None):
 		super().__init__()
 
-		self.defaultRecognizer = Recognizer()
+		# Demo Data
+		if aircrafts is None:
+			print("!!! Loading demo aircrafts !!!")
+			aircrafts = [
+				Aircraft("1", "D-1234", "Std. Libelle", compNo="YY"),
+				Aircraft("2", "D-1337", "Duo Discus", seats=2, compNo="YX"),
+				Aircraft("3", "D-MLOL", "Turbo Savage", seats=2, kind="microlight", launcher=True)
+			]
 
-		self.timeRecognizer = TimeRecognizer()
-		self.durationRecognizer = DurationRecognizer()
+		if pilots is None:
+			print("!!! Loading demo pilots !!!")
+			pilots = [
+				Pilot("1", "Major", "Max"),
+				Pilot("2", "Haggard", "Hannah"),
+				Pilot("3", "Pielmann", "Peter", nickName="Puddy")
+			]
 
-		self.aircraftRecognizer = AircraftRecognizer(aircrafts, self._aircraftsAvailable)
-		self.pilotRecognizer = PilotRecognizer(pilots, self._pilotsAvailable)
-		self.locationRecognizer = LocationRecognizer(locations, self._locationsAvailable)
+		if locations is None:
+			print("!!! Loading demo locations !!!")
+			locations = [
+				Location("1", "Rhinowmark"),
+				Location("2", "Summern"),
+				Location("3", "Hangsen"),
+				Location("4", "Dusseldorf", "DUS", "EDDL"),
+				Location("5", "Finkenwarner")
+			]
 
+		# Presets
 		self.presetLauncher = None
 		self.presetDate = None
 		self.presetAircraft = None
@@ -723,12 +832,25 @@ class Processor():
 		self.presetCopilot = None
 		self.presetLocation = None
 
-		self.unknown = []
-		self.clarify = []
-		self.tokens = []
+		# Recognizers
+		self.defaultRecognizer = Recognizer(self)
 
-		self.activities = []
+		self.timeRecognizer = TimeRecognizer(self)
+		self.durationRecognizer = DurationRecognizer(self)
+		self.dateRecognizer = DateRecognizer(self)
+
+		self.aircraftRecognizer = AircraftRecognizer(self, aircrafts, self._aircraftsAvailable)
+		self.pilotRecognizer = PilotRecognizer(self, pilots, self._pilotsAvailable)
+		self.locationRecognizer = LocationRecognizer(self, locations, self._locationsAvailable)
+
+		# Processing data
+		self.unknown = None
+		self.clarify = None
+		self.tokens = None
+
+		self.activities = None
 		self.current = None
+		self.reset(hard=True)
 
 	def _aircraftsAvailable(self, rec):
 		pass
@@ -742,11 +864,10 @@ class Processor():
 	def reset(self, hard = True):
 		if hard:
 			self.presetLauncher = None
-			self.presetDate = None
+			self.presetDate = datetime.datetime.utcnow()
 			self.presetAircraft = None
 			self.presetPilot = None
 			self.presetCopilot = None
-			self.presetLocation = None
 
 		self.unknown = []
 		self.clarify = []
@@ -770,10 +891,10 @@ class Processor():
 			# Create activity on new aircraft, check if it can be linked.
 			if self.current and self.canTowLaunch(self.current.aircraft, res.obj):
 				print("Linking current activity with %s to %s" % (self.current.aircraft, res.obj))
-				self.current = Activity(res.obj, link=self.current)
+				self.current = Activity(self, res.obj, link=self.current)
 			else:
 				print("Creating new activity for %s" % res.obj)
-				self.current = Activity(res.obj)
+				self.current = Activity(self, res.obj)
 
 			self.activities.append(self.current)
 
@@ -894,8 +1015,14 @@ class Processor():
 
 				self.presetAircraft = activity
 
-		# Extend unrecognized tokens
-		self.unknown.extend(self.clarify)
+		if self.clarify:
+			for entry in self.clarify[:]:
+				if isinstance(entry.obj, datetime.date):
+					self.presetDate = entry.obj
+					self.clarify.remove(entry)
+
+			# Extend unrecognized tokens
+			self.unknown.extend(self.clarify)
 
 		for act in results:
 			if not act.complete():
@@ -932,7 +1059,7 @@ class Processor():
 			while s:
 				res = None
 
-				for r in [self.timeRecognizer, self.durationRecognizer,
+				for r in [self.dateRecognizer, self.timeRecognizer, self.durationRecognizer,
 						  	self.pilotRecognizer, self.aircraftRecognizer,
 						  		self.locationRecognizer]:
 					res = r.recognize(s)
@@ -968,27 +1095,7 @@ print("AIRBATCH LOADED")
 if __name__ == "__main__":
 	import sys
 
-	aircrafts = [
-		Aircraft("1", "D-1234", "Std. Libelle", compNo="YY"),
-		Aircraft("2", "D-1337", "Duo Discus", seats=2, compNo="YX"),
-		Aircraft("3", "D-MLOL", "Turbo Savage", seats=2, kind="microlight", launcher=True)
-	]
-
-	pilots = [
-		Pilot("1", "Major", "Jan Max"),
-		Pilot("2", "Haggard", "Hannah"),
-		Pilot("3", "Peter", "Pielman", nickName="Puddy")
-	]
-
-	locations = [
-		Location("1", "Rhinowmark"),
-		Location("2", "Summern"),
-		Location("3", "Hangsen"),
-		Location("4", "Dusseldorf", "DUS", "EDDL"),
-		Location("5", "Finkenwarner")
-	]
-
-	p = Processor(aircrafts, pilots, locations)
+	p = Processor()
 
 	if len(sys.argv) < 2:
 		while True:

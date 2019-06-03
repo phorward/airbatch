@@ -9,12 +9,14 @@ from browser import document, window, html
 
 class AssistantProcessor(airbatch.Processor):
 
-	def __init__(self):
-		super().__init__()
+	def __init__(self, *args, **kwargs):
+		super().__init__(*args, **kwargs)
+
+		self.mode = "assistant"
 
 		self.allowedRecognizers = [
+			self.dateRecognizer,
 			self.aircraftRecognizer,
-			self.pilotRecognizer,
 			self.pilotRecognizer,
 			self.locationRecognizer,
 			self.timeRecognizer,
@@ -41,8 +43,10 @@ class AssistantProcessor(airbatch.Processor):
 		self.editor.bind("change", self.checkInput)
 		self.batchSwitch.bind("change", self.switchMode)
 		document["btn-parse"].bind("click", self.doParse)
+		document["btn-time"].bind("click", self.insertTime)
 
 		window.setTimeout(self.editor.focus, 500)
+		window.setInterval(self.updateTime, 1000)
 
 		batch = window.localStorage.getItem(datetime.datetime.now().strftime("batch-%Y-%m-%d"))
 		if batch:
@@ -52,9 +56,14 @@ class AssistantProcessor(airbatch.Processor):
 	# --- Pure batch mode
 
 	def insertCode(self, txt):
-		start = self.batchEditor.selectionStart
-		txt = self.batchEditor.value[:start] + txt + " " + self.batchEditor.value[start:]
-		self.batchEditor.value = txt
+		if self.mode == "batch":
+			widget = "batch-editor"
+		else:
+			widget = "editor"
+
+		start = document[widget].selectionStart
+		txt = document[widget].value[:start] + txt + " " + document[widget].value[start:]
+		document[widget].value = txt
 
 	def insertObject(self, event):
 		opt = event.target
@@ -381,9 +390,17 @@ class AssistantProcessor(airbatch.Processor):
 		if self.batch.style.display == "none":
 			self.batch.style.display = ""
 			self.constructionRow.style.display = "none"
+			self.mode = "batch"
 		else:
 			self.batch.style.display = "none"
 			self.constructionRow.style.display = ""
+			self.mode = "assistant"
+
+	def updateTime(self):
+		document["btn-time"].innerHTML = datetime.datetime.utcnow().strftime("%H:%M")
+
+	def insertTime(self, e):
+		self.insertCode(datetime.datetime.utcnow().strftime("%H%M"))
 
 
 AssistantProcessor()

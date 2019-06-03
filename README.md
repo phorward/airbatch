@@ -4,7 +4,7 @@ Flight Data Recognition Framework
 
 ## About
 
-![Tow launch](towlaunch.jpg)
+![Preparation for tow launch](preparation.jpg)
 
 Aircraft movement has to be recorded for several reasons, mostly for legal regulations but also for billing. Especially smaller airfields like clubs for soaring or microlight aircraft don't have fully fledged, GPS-aided tracking and flight recording facilities.
 
@@ -50,8 +50,6 @@ OL puddy major 1500 1510 Hangsen
 ```
 
 It's on yours how you feed Airbatch!
-
-![Preparation for tow launch](preparation.jpg)
 
 ## License
 
